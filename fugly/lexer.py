@@ -5,9 +5,10 @@ from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass as _dataclass
 
-from fugly.tokenizer import ImmutableTokenStream, Optional
+from fugly.tokenizer import ImmutableTokenStream, TokenStream, Optional
 
 from .tokenizer import *
+from .stream import StreamExpectError, QuietStreamExpectError
 
 _LOG = getLogger(__name__)
 
@@ -31,11 +32,57 @@ def _indent():
         _FORMATTING_DEPTH.reset(reset)
 
 
+class LexError(Exception):
+    ...
+
+
+class LexWarning(Warning):
+    ...
+
+
+def parse(istream: ImmutableTokenStream) -> Optional['Document']:
+    try:
+        return Document.try_lex(istream)
+    except LexError as ex:
+        _LOG.error("%sFailed to lex `Document`: %s", 'x ' * istream.depth, ex)
+    except StreamExpectError as ex:
+        expected = ex.expected.__name__ if isinstance(ex.expected, type) else repr(ex.expected)
+        _LOG.error("%sFailed to lex `Document`: Expected %s, got %r", 'x ' * istream.depth, expected, ex.got)
+
+
 class Lex(ABC):
+    """Base class for a lexical element."""
 
     @classmethod
     def try_lex(cls, istream: ImmutableTokenStream) -> Optional['Lex']:
-        raise NotImplementedError()
+        _LOG.debug("%sTrying to lex `%s`", '| ' * istream.depth, cls.__name__)
+        with istream.clone() as stream:
+            try:
+                ret = cls._try_lex(stream)
+                if ret is not None:
+                    stream.commit()
+                    _LOG.debug("%sWas a `%s`!", 'y ' * istream.depth, cls.__name__)
+                return ret
+            except LexWarning as ex:
+                _LOG.warn("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
+            except EOFError as ex:
+                _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
+            except QuietStreamExpectError:
+                pass
+
+    @classmethod
+    def expect(cls, istream: ImmutableTokenStream) -> 'Lex':
+        ret = cls.try_lex(istream)
+        if ret is None:
+            raise LexError(f"Expected `{cls.__name__}`")
+        return ret
+
+    @classmethod
+    def _try_lex(cls, stream: TokenStream) -> Optional['Lex']:
+        ...
+
+    def check(self) -> None:
+        ...
 
     def __repr__(self) -> str:
         value = getattr(self, 'value', None)
@@ -81,9 +128,7 @@ class Lex(ABC):
 
 
 class Identifier(Lex):
-    """
-    Identifier: Word
-    """
+    """Identifier: Word"""
     value: str
 
     def __init__(self, value):
@@ -96,23 +141,12 @@ class Identifier(Lex):
         return f'Identifier<{self.value}>', []
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Identifier`", "| " * istream.depth)
-        with istream.clone() as stream:
-            value = stream.pop()
-            if not isinstance(value, Word):
-                _LOG.warn(f"%sExpected Word, got {value}", 'x ' * istream.depth)
-                return
-            stream.commit()
-            ret = cls(value.value)
-            _LOG.debug("%sGot %r!", '| ' * stream.depth, ret)
-            return ret
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        return cls(stream.expect(Word).value)
 
 
 class Literal(Lex):
-    """
-    Literal: String | Number;
-    """
+    """Literal: String | Number;"""
     value: str
 
     def __init__(self, value):
@@ -125,20 +159,15 @@ class Literal(Lex):
         return self.value, []
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Literal`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            value = stream.pop()
-            if not (isinstance(value, String) or isinstance(value, Number)):
-                return
-            stream.commit()
-            return cls(value.value)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        value = stream.pop()
+        if not (isinstance(value, String) or isinstance(value, Number)):
+            return
+        return cls(value.value)
 
 
 class Atom(Lex):
-    """
-    Atom: Literal | Identifier | '(' Expression ')'
-    """
+    """Atom: Literal | Identifier | '(' Expression ')'"""
     value: Union[Literal, Identifier, 'Expression']
 
     def __init__(self, value):
@@ -148,45 +177,27 @@ class Atom(Lex):
         return f"({self.value})" if isinstance(self.value, Expression) else self.value.value
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Atom`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            boundary = stream.peek()
-
-            if isinstance(boundary, LParen):
-                boundary.pop()
-                if (body := Expression.try_lex(stream)) is None:
-                    return
-                if not isinstance(stream.pop(), RParen):
-                    return
-                stream.commit()
-                return cls(body)
-
-            value = Literal.try_lex(stream) or Identifier.try_lex(stream)
-            if value is None:
-                return
-
-            stream.commit()
-            return value
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if isinstance(stream.peek(), LParen):
+            stream.pop()
+            if (body := Expression.try_lex(stream)) is None:
+                raise LexError("Expected `Expression`.")
+            stream.expect(RParen)
+            return cls(body)
+        return Literal.try_lex(stream) or Identifier.try_lex(stream)
 
 
 DEFAULT_BINDING_POWER = (1.0, 1.1)
 BINDING_POWER: dict[type[Token], tuple[int, int]] = {Asterisk: (5.0, 5.1)}
 
 
+@lex_dataclass
 class Infix(Lex):
-    """
-    Add: Atom '+' Atom;
-    """
-    OPERATORS = (Plus, Asterisk, Comma)
+    """Add: Atom '+' Atom;"""
+    OPERATORS = (Plus, Asterisk, Comma, Equals)
     lhs: 'Atom'
     rhs: 'Atom'
     oper: 'Token'
-
-    def __init__(self, lhs, oper, rhs):
-        self.lhs = lhs
-        self.oper = oper
-        self.rhs = rhs
 
     def _tree(self) -> tuple[str, list[Self]]:
         return f"Infix<{self.oper.value}>", [self.lhs, self.rhs]
@@ -198,44 +209,34 @@ class Infix(Lex):
         return f"Infix<{self.lhs!r}{self.oper.value}{self.rhs!r}>"
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream, min_bp=0) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Infix`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            lhs: Atom | Infix | None
-            if (lhs := Atom.try_lex(stream)) is None:
-                _LOG.warn("%sExpected Atom", '| ' * istream.depth)
-                return
-            if stream.eof:
-                _LOG.debug("%sGot EOF", 'x ' * istream.depth)
-                return
+    def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
+        lhs: Atom | Infix | None
+        if (lhs := Atom.try_lex(stream)) is None:
+            return
 
-            while True:
-                oper = stream.peek()
-                if not any(isinstance(oper, o) for o in cls.OPERATORS):
-                    _LOG.warn("%sExpected ('%s'), got '%s'", '| ' * istream.depth,
-                              "'|'".join(o.CHAR for o in cls.OPERATORS), oper.value)
-                    break
-                l_bp, r_bp = BINDING_POWER.get(type(oper), DEFAULT_BINDING_POWER)
-                if l_bp < min_bp:
-                    break
-                stream.pop()
-                if (rhs := cls.try_lex(stream, r_bp)) is None:
-                    _LOG.warn("%sExpected Atom", '| ' * istream.depth)
-                    break
-                lhs = cls(lhs, oper, rhs)
+        while True:
+            oper = stream.peek()
+            if not any(isinstance(oper, o) for o in cls.OPERATORS):
+                break
+            l_bp, r_bp = BINDING_POWER.get(type(oper), DEFAULT_BINDING_POWER)
+            if l_bp < min_bp:
+                break
+            stream.pop()
+            if (rhs := cls.try_lex(stream, r_bp)) is None:
+                break
+            lhs = cls(lhs, oper, rhs)
 
-            stream.commit()
-            return lhs
+        return lhs
+
+    def check(self):
+        self.lhs.check()
+        self.rhs.check()
 
 
+@lex_dataclass
 class Expression(Lex):
-    """
-    Expression := Add | Identifier | Literal;
-    """
-    value: Union[Infix, 'Atom', 'Assignment']
-
-    def __init__(self, value) -> None:
-        self.value = value
+    """Expression := Add | Identifier | Literal;"""
+    value: Union[Infix, 'Atom']
 
     def __str__(self) -> str:
         return str(self.value)
@@ -246,96 +247,40 @@ class Expression(Lex):
     @classmethod
     @property
     def allowed(self) -> Iterable[type[Lex]]:
-        return [Assignment, Infix, Atom]
+        return [Infix, Atom]
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Expression`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            for t in cls.allowed:
-                ret = t.try_lex(stream)
-                if ret is not None:
-                    _LOG.debug("%sWas an Expression!", '| ' * istream.depth)
-                    stream.commit()
-                    return cls(ret)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        for t in cls.allowed:
+            if (ret := t.try_lex(stream)) is not None:
+                return cls(ret)
+
+    def check(self):
+        self.value.check()
 
 
+@lex_dataclass
 class ReturnStatement(Lex):
-    """
-    ReturnStatement: 'return' Expression;
-    """
+    """ReturnStatement: 'return' Expression;"""
     value: 'Expression'
-
-    def __init__(self, value):
-        self.value = value
 
     def __str__(self) -> str:
         return f"{_tab()}return {self.value};\n"
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `ReturnStatement`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if not isinstance(stream.pop(), Return):
-                return
-            value = Expression.try_lex(stream)
-            if value is None and not isinstance(value := stream.pop(), Word):
-                _LOG.warn("Expected Expression or Identifier, got %s", value.value)
-                return None
-            if not isinstance((x := stream.pop()), Semicolon):
-                _LOG.warn("Expected ;, got %r", x.value)
-                return
-            stream.commit()
-            return cls(value)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        stream.expect(Return, quiet=True)
+        value = Expression.try_lex(stream)
+        stream.expect(Semicolon)
+        return cls(value)
 
-
-class Assignment(Lex):
-    """
-    Assignment := Identifier '=' Expression
-    """
-    lhs: Identifier
-    rhs: Expression
-
-    def __init__(self, lhs, rhs):
-        self.lhs = lhs
-        self.rhs = rhs
-
-    def __str__(self) -> str:
-        return f"{self.lhs} = {self.rhs}"
-
-    def __repr__(self) -> str:
-        return f"Assignment<{self.lhs!r}={self.rhs!r}>"
-
-    def _tree(self) -> tuple[str, list[Self]]:
-        return 'Assignment', [self.lhs, self.rhs]
-
-    @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Assignment`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            lhs: Identifier | None = None
-            if stream.eof:
-                return
-            lhs = Identifier.try_lex(stream)
-            if lhs is None:
-                return
-
-            if lhs is None:
-                _LOG.warn("%sExpected Identifier", '| ' * istream.depth)
-                return
-            if not isinstance(stream.pop(), Equals):
-                _LOG.warn("%sExpected =", '| ' * istream.depth)
-                return
-            rhs = Expression.try_lex(stream)
-            if rhs is None:
-                return
-
-            stream.commit()
-            return cls(lhs, rhs)
+    def check(self):
+        self.value.check()
 
 
 @lex_dataclass
 class ParamList(Lex):
+    """ParamList: '(' Identity [',' Identity[...]] ')';"""
     params: list['Identity']
 
     def __str__(self) -> str:
@@ -350,36 +295,34 @@ class ParamList(Lex):
         return 'ParamList' if self.params else 'ParamList (empty)', self.params
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug('%sTrying to lex `ParamList`', '| ' * istream.depth)
-        with istream.clone() as stream:
-            if not isinstance(stream.pop(), LParen):
-                return
-            if isinstance(stream.peek(), RParen):
-                stream.pop()
-                stream.commit()
-                return cls([])
-            if (start := Identity.try_lex(stream)) is None:
-                _LOG.warn("%sExpected Identity", 'x ' * istream.depth)
-                return
-            params = [start]
-            while isinstance(stream.peek(), Comma):
-                stream.pop()
-                if (next := Identity.try_lex(stream)) is None:
-                    _LOG.warn("Was not a Identity!")
-                    return
-                params.append(next)
-            if not isinstance((x := stream.pop()), RParen):
-                _LOG.warn("%sExpected ')', got %r", 'x ' * istream.depth, x.value)
-                return
-            stream.commit()
-            ret = cls(params)
-            _LOG.debug("%sGot %r", '| ' * istream.depth, ret)
-            return cls(params)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        stream.expect(LParen, quiet=True)
+
+        if isinstance(stream.peek(), RParen):
+            stream.pop()
+            return cls([])
+
+        if (start := Identity.try_lex(stream)) is None:
+            raise LexError("Expected Identity.")
+
+        params = [start]
+        while isinstance(stream.peek(), Comma):
+            stream.pop()
+            if (next := Identity.try_lex(stream)) is None:
+                raise LexError("Expected Identity.")
+            params.append(next)
+
+        stream.expect(RParen)
+        return cls(params)
+
+    def check(self):
+        for param in self.params:
+            param.check()
 
 
 @lex_dataclass
 class ArrayDef(Lex):
+    """ArrayDef: '[' [Number] ']';"""
     size: Number | None
 
     def __str__(self) -> str:
@@ -395,19 +338,17 @@ class ArrayDef(Lex):
         return f"ArrayDef<{size}>", []
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `ArrayDef`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if not isinstance(stream.pop(), LBracket):
-                return
-            size = None
-            if isinstance(stream.peek(), Number):
-                size = stream.pop()
-            if not isinstance((x := stream.pop()), RBracket):
-                _LOG.warn("%sExpected ']', got %r", 'x ' * istream.depth, x.value)
-                return
-            stream.commit()
-            return cls(size)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        stream.expect(LBracket, quiet=True)
+        size = None
+        if isinstance(stream.peek(), Number):
+            size = stream.pop()
+        stream.expect(RBracket)
+        return cls(size)
+
+    def check(self):
+        if '.' in self.size.value:
+            _LOG.error("Array sizes cannot be decimals.")
 
 
 @lex_dataclass
@@ -431,20 +372,23 @@ class Type_(Lex):
         return f"Type_<{self.ident}>", self.mods
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Type_`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if (ident := Identifier.try_lex(stream)) is None:
-                return
-            mods = []
-            while (mod := (ParamList.try_lex(stream) or ArrayDef.try_lex(stream))) is not None:
-                mods.append(mod)
-            stream.commit()
-            return cls(ident, mods)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if (ident := Identifier.try_lex(stream)) is None:
+            return
+        mods = []
+        while (mod := (ParamList.try_lex(stream) or ArrayDef.try_lex(stream))) is not None:
+            mods.append(mod)
+        return cls(ident, mods)
+
+    def check(self):
+        self.ident.check()
+        for mod in self.mods:
+            mod.check()
 
 
 @lex_dataclass
 class Identity(Lex):
+    """Identity: Identifier ':' ('namespace' | Type_);"""
     lhs: Identifier
     rhs: Union[Namespace, Type_]
 
@@ -460,37 +404,29 @@ class Identity(Lex):
         return f"Identity<{self.lhs.value}>", [self.rhs]
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to parse Identity", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if (lhs := Identifier.try_lex(stream)) is None:
-                return
-            if not isinstance((x := stream.pop()), Colon):
-                _LOG.warn("%sExpected ':', got %s", 'x ' * istream.depth, x.value)
-                return
-            if stream.eof:
-                _LOG.warn("%sExpected 'namespace'|Type_, got EoF", "x " * istream.depth)
-                return
-            if isinstance(stream.peek(), Namespace):
-                rhs = stream.pop()
-            elif (rhs := Type_.try_lex(stream)) is None:
-                _LOG.debug("%sExpected Type_", 'x ' * istream.depth)
-                return
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if (lhs := Identifier.try_lex(stream)) is None:
+            return
+        stream.expect(Colon)
 
-            stream.commit()
-            return cls(lhs, rhs)
+        if isinstance(stream.peek(), Namespace):
+            rhs = stream.pop()
+        elif (rhs := Type_.try_lex(stream)) is None:
+            raise LexError("Expected a `Type_` or 'namespace'.")
+
+        return cls(lhs, rhs)
+
+    def check(self) -> None:
+        self.lhs.check()
+        if not isinstance(self.rhs, Namespace):
+            self.rhs.check()
 
 
+@lex_dataclass
 class Declaration(Lex):
-    """
-    Declaration := Identifier ':' Identifier [ '=' Expression ]
-    """
+    """Declaration: Identity [ '=' Expression | Scope ];"""
     identity: Identity
     initial: Union['Scope', 'Expression', None] = None
-
-    def __init__(self, type_sig, initial=None):
-        self.identity = type_sig
-        self.initial = initial
 
     def __str__(self) -> str:
         if self.initial is not None:
@@ -505,42 +441,35 @@ class Declaration(Lex):
         return f"Declaration<{self.identity}>", [] if self.initial is None else [self.initial]
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Declaration`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if (identity := Identity.try_lex(stream)) is None:
-                _LOG.warn("%sExpected Identity", '| ' * istream.depth)
-                return
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if (identity := Identity.try_lex(stream)) is None:
+            return
 
-            if not isinstance(stream.peek(), Equals):
-                stream.commit()
-                _LOG.debug("%sWas a Declaration (without initial value)!", "y " * istream.depth)
-                return cls(identity)
-            stream.pop()
+        if not isinstance(stream.peek(), Equals):
+            return cls(identity)
 
-            val = Scope.try_lex(stream) or Expression.try_lex(stream)
-            if val is None:
-                _LOG.warn("Expected expression")
-                return
+        stream.pop()
 
-            stream.commit()
-            _LOG.debug("%sWas a Declaration (with value)!", "y " * istream.depth)
-            return cls(identity, val)
+        val = Scope.try_lex(stream) or Expression.try_lex(stream)
+        if val is None:
+            raise LexError("Expected a `Scope` or `Expression`!")
+        return cls(identity, val)
+
+    def check(self) -> None:
+        self.identity.check()
+        if self.initial is not None:
+            self.initial.check()
 
 
+@lex_dataclass
 class Statement(Lex):
-    """
-    Statement: Declaration | Expression;
-    """
+    """Statement: Declaration | Expression;"""
     value: Union['Expression', 'Declaration']
 
     @classmethod
     @property
     def allowed(self) -> Iterable[type[Lex]]:
         return [Declaration, Expression]
-
-    def __init__(self, content):
-        self.value = content
 
     def __str__(self) -> str:
         return f'{_tab()}{self.value};\n'
@@ -549,34 +478,29 @@ class Statement(Lex):
         return f"Statement<{self.value!r}>"
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Statement`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            res = None
-            for t in cls.allowed:
-                # _LOG.debug(f"%sTrying {t.__name__}", '| ' * istream.depth)
-                if (res := t.try_lex(stream)) is not None:
-                    break
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        res = None
+        for t in cls.allowed:
+            if (res := t.try_lex(stream)) is not None:
+                break
+        stream.expect(Semicolon)
+        return cls(res)
 
-            if not isinstance((t := stream.pop()), Semicolon):
-                _LOG.warn("%sExpected ';', got %r", '| ' * istream.depth, t.value)
-                return
-
-            stream.commit()
-            _LOG.debug("%sWas a Statement!", 'y ' * istream.depth)
-            return cls(res)
+    def check(self) -> None:
+        self.value.check()
 
 
 @lex_dataclass
 class Scope(Lex):
+    """Scope: '{' (Statement | ReturnStatement)* '}';"""
     content: list['ReturnStatement', 'Statement']
 
     def __str__(self) -> str:
         with _indent():
             inner = ''.join(str(x) for x in self.content)
-        if inner:
-            inner = '\n' + inner
-        return '{' + inner + _tab() + '}'
+        if not inner:
+            return '{ }'
+        return '{\n' + inner + _tab() + '}'
 
     def __repr__(self) -> str:
         inner = ', '.join(repr(x) for x in self.content)
@@ -586,29 +510,29 @@ class Scope(Lex):
         return "Scope", self.content
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Scope`", '| ' * istream.depth)
-        with istream.clone() as stream:
-            if not isinstance((tok := stream.pop()), LBrace):
-                _LOG.warn('Expected {, got %r', tok.value)
-                return
-            ret = []
-            while not stream.eof and not isinstance(stream.peek(), RBrace) and (
-                (res := ReturnStatement.try_lex(stream)) is not None or (res := Statement.try_lex(stream)) is not None):
-                ret.append(res)
-            if stream.eof:
-                _LOG.warn("Expected }, got EOF")
-                return
-            if not isinstance((tok := stream.pop()), RBrace):
-                _LOG.warn('Expected }, got %r', tok.value)
-                return
-            stream.commit()
-            _LOG.debug("%sWas a Scope!", 'y ' * istream.depth)
-            return cls(ret)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        stream.expect(LBrace, quiet=True)
+        ret = []
+        while not isinstance(stream.peek(), RBrace) and ((res := ReturnStatement.try_lex(stream)) is not None or
+                                                         (res := Statement.try_lex(stream)) is not None):
+            ret.append(res)
+        stream.expect(RBrace)
+        return cls(ret)
+
+    def check(self):
+        if not self.content:
+            _LOG.warn("Empty Scope?")
+            return
+        last = self.content[-1]
+        for statement in self.content:
+            statement.check()
+            if isinstance(statement, ReturnStatement) and statement is not last:
+                _LOG.error("Return statement was not the last statement in scope.")
 
 
 @lex_dataclass
 class Document(Lex):
+    """Document: Statement* EOF;"""
     statements: list[Statement]
 
     @classmethod
@@ -627,14 +551,12 @@ class Document(Lex):
         return 'Document', self.statements
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream) -> Lex | None:
-        _LOG.debug("%sTrying to lex `Document`", "| " * istream.depth)
-        with istream.clone() as stream:
-            statements: list[Statement] = []
-            while not stream.eof and (res := Statement.try_lex(stream)) is not None:
-                statements.append(res)
-            if not stream.eof:
-                _LOG.warn("%sLex of Document did not consume entire file!", "| " * stream.depth)
-                return None
-            stream.commit()
-            return cls(statements)
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        statements: list[Statement] = []
+        while (res := Statement.try_lex(stream)):
+            statements.append(res)
+        return cls(statements)
+
+    def check(self) -> None:
+        for statement in self.statements:
+            statement.check()

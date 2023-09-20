@@ -31,6 +31,9 @@ class Stream(ImmutableStream[T, Tk], Protocol):
     def commit(self) -> None:
         ...
 
+    def expect(self, type_: type[T], silent=False) -> T:
+        ...
+
 
 # StrStream: a stream of strings (chars)
 

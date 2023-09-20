@@ -1,6 +1,6 @@
 from io import TextIOBase
 from contextlib import contextmanager
-from typing import TypeVar, Generic, ContextManager, Iterable
+from typing import TypeVar, Generic, Any
 
 from . import StrStream as _StrStream, Stream as _Stream
 
@@ -87,6 +87,19 @@ class StrStream(_StrStream):
 T = TypeVar('T', covariant=True)
 
 
+class StreamExpectError(Exception):
+    expected: Any
+    got: Any
+
+    def __init__(self, expected, got):
+        self.expected = expected
+        self.got = got
+
+
+class QuietStreamExpectError(Exception):
+    ...
+
+
 class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
     __list: list[T]
     __index: int
@@ -119,18 +132,27 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
             # else:
             # print("...Rollback")
 
-    def peek(self) -> T:
+    def peek(self) -> T | None:
         if self.eof:
             return None
         # print(f'Peek<{self.__list[self.__index]}>')
         return self.__list[self.__index]
 
-    def pop(self) -> T:
+    def pop(self) -> T | None:
         if self.eof:
             return None
         self.__index += 1
         # print(f'Pop<{self.__list[self.__index - 1]}>')
         return self.__list[self.__index - 1]
+
+    def expect(self, type_: type[T], quiet=False) -> T:
+        if self.eof:
+            raise EOFError()
+        if not isinstance(peek := self.__list[self.__index], type_):
+            if quiet:
+                raise QuietStreamExpectError(type_, peek)
+            raise StreamExpectError(type_, peek)
+        return self.pop()
 
     def commit(self) -> None:
         self.__committed = True

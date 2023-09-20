@@ -5,7 +5,7 @@ from logging import getLogger, basicConfig, DEBUG
 from . import NAME
 from .stream import StrStream, ListStream
 from .tokenizer import Token
-from .lexer import *
+from .lexer import parse
 
 _LOG = getLogger()
 _LOG.setLevel(DEBUG)
@@ -28,7 +28,7 @@ def main(*args) -> int:
 
     token_stream = ListStream(tokens)
 
-    lex = Document.try_lex(token_stream)
+    lex = parse(token_stream)
     if not token_stream.eof:
         print(f"Failed at: {token_stream.peek()}")
         return 1
@@ -36,9 +36,10 @@ def main(*args) -> int:
         print(f'Failed to lex.')
         return 1
 
-    print('```\n' + str(lex) + '```')
     lex.unrepr()
     lex.tree()
+    print('```\n' + str(lex) + '```')
+    lex.check()
 
     return 0
 
