@@ -1,4 +1,1 @@
-add_one: (y: i32): i32 ={
-    var x: i32 = y + 1;
-    return x;
-}
+main: int(args: str[]) = {};

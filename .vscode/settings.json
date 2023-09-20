@@ -13,5 +13,21 @@
         "**/Thumbs.db": true,
         "**/__pycache__": true
     },
-    "mypy-type-checker.importStrategy": "fromEnvironment"
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "workbench.colorCustomizations": {
+        "commandCenter.border": "#e7e7e799",
+        "sideBar.border": "#2e773d",
+        "statusBar.background": "#20522a",
+        "statusBar.border": "#20522a",
+        "statusBar.foreground": "#e7e7e7",
+        "statusBarItem.hoverBackground": "#2e773d",
+        "statusBarItem.remoteBackground": "#20522a",
+        "statusBarItem.remoteForeground": "#e7e7e7",
+        "titleBar.activeBackground": "#20522a",
+        "titleBar.activeForeground": "#e7e7e7",
+        "titleBar.border": "#20522a",
+        "titleBar.inactiveBackground": "#20522a99",
+        "titleBar.inactiveForeground": "#e7e7e799"
+    },
+    "peacock.color": "#20522a"
 }

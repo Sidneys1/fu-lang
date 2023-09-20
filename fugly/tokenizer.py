@@ -15,6 +15,8 @@ class TokenStream(Stream['Token', 'TokenStream']):
 class Token(ABC):
     __REGISTRY: dict[type['Token'], None] = {}
 
+    CANON: str = '???'
+
     value: str
 
     def __init__(self, value):
@@ -24,7 +26,7 @@ class Token(ABC):
         if not isabstract(cls) and ABC not in cls.__bases__:
             Token.__REGISTRY[cls] = None
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}<{self.value}>"
 
     @staticmethod
@@ -45,6 +47,37 @@ class Token(ABC):
     @abstractmethod
     def try_consume(cls, istream: ImmutableStrStream) -> Optional['Token']:
         ...
+
+
+class String(Token):
+    DISALLOWED = '\r\n'
+
+    @classmethod
+    def try_consume(cls, istream: ImmutableStrStream) -> Token | None:
+        with istream.clone() as stream:
+            if stream.peek() not in ('"', "'"):
+                return None
+            start = stream.pop()
+            builder = start
+            while True:
+                if stream.eof:
+                    raise EOFError()
+                c = stream.pop()
+                if c in cls.DISALLOWED:
+                    raise RuntimeError()
+                builder += c
+                if c == '\\':
+                    if stream.eof:
+                        raise EOFError()
+                    if stream.peek() in cls.DISALLOWED:
+                        raise RuntimeError()
+                    builder += stream.pop()
+                    continue
+                if c == start:
+                    break
+            stream.consume_whitespace()
+            stream.commit()
+            return cls(builder)
 
 
 class Char(Token, ABC):
@@ -85,12 +118,24 @@ class RBrace(Char):
     CHAR = '}'
 
 
+class LBracket(Char):
+    CHAR = '['
+
+
+class RBracket(Char):
+    CHAR = ']'
+
+
 class Equals(Char):
     CHAR = '='
 
 
 class Plus(Char):
     CHAR = '+'
+
+
+class Asterisk(Char):
+    CHAR = '*'
 
 
 class Semicolon(Char):
@@ -120,12 +165,16 @@ class Keyword(Token, ABC):
         return cls.__name__
 
 
-class Var(Keyword):
-    WORD = 'var'
+# class Var(Keyword):
+#     WORD = 'var'
 
 
 class Return(Keyword):
     WORD = 'return'
+
+
+class Namespace(Keyword):
+    WORD = 'namespace'
 
 
 class CharClass(Token, ABC):
@@ -151,4 +200,5 @@ class Word(CharClass):
 
 
 class Number(CharClass):
-    CHARS = digits
+    START_CHARS = digits
+    CHARS = digits + '._'
