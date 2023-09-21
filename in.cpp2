@@ -1,1 +1,5 @@
-foo: namespace = { main: int(args: str[1.2]) = {}; };
+foo: namespace = {
+    main: int(args: str[]) = {
+        return 2!;
+    }; 
+};

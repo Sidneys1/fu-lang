@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Iterable, Optional, Union, Self
+from typing import Iterable, Optional, Union, Self, Literal as Literal_
 from logging import getLogger
 from contextvars import ContextVar
 from contextlib import contextmanager
@@ -7,7 +7,7 @@ from dataclasses import dataclass as _dataclass
 
 from fugly.tokenizer import ImmutableTokenStream, TokenStream, Optional
 
-from .tokenizer import *
+from .tokenizer import TokenType, Token
 from .stream import StreamExpectError, QuietStreamExpectError
 
 _LOG = getLogger(__name__)
@@ -91,16 +91,17 @@ class Lex(ABC):
 
     def unrepr(self, s=None) -> None:
         if s is None:
-            s = repr(self)
+            s = self.s_expr()
             print(s)
         p = 0
         build = ''
-        children = self._tree()[1]
+        children = self._s_expr()[1]
         while children:
             for child in children:
-                r = repr(child)
+                if not isinstance(child, Lex):
+                    continue
+                r = child.s_expr()
                 p = s.find(r, p)
-                # _LOG.debug("%d, %s", p, r)
                 build += ' ' * (p - len(build))
                 build += r
                 p += len(r)
@@ -109,22 +110,16 @@ class Lex(ABC):
             p = 0
             s = build
             build = ''
-            children = [g for c in children for g in c._tree()[1]]
+            children = [g for c in children if isinstance(c, Lex) for g in c._s_expr()[1]]
 
-    def _tree(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Self]]:
         if isinstance(value := getattr(self, 'value', None), Lex):
-            return self.__class__.__name__, [value]
+            return self.__class__.__name__.lower(), [value]
         raise NotImplementedError(f"_tree not implemented for {self.__class__.__name__}")
 
-    def tree(self, depth: int = 0, draw_depth=True) -> None:
-        display, children = self._tree()
-        if len(children) == 1:
-            print(('| ' * depth) if draw_depth else '', display, ' -> ', sep='', end='')
-            children[0].tree(depth + 1, False)
-            return
-        print(('| ' * depth) if draw_depth else '', display, sep='')
-        for child in children:
-            child.tree(depth + 1)
+    def s_expr(self) -> str:
+        display, children = self._s_expr()
+        return '(' + ' '.join(c.s_expr() if isinstance(c, Lex) else str(c) for c in [display] + children) + ')'
 
 
 class Identifier(Lex):
@@ -137,106 +132,181 @@ class Identifier(Lex):
     def __str__(self) -> str:
         return self.value
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return f'Identifier<{self.value}>', []
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return 'identifier', [self.value]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        return cls(stream.expect(Word).value)
+        return cls(stream.expect(TokenType.Word).value)
 
 
-class Literal(Lex):
-    """Literal: String | Number;"""
-    value: str
+# class Literal(Lex):
+#     """Literal: String | Number;"""
+#     value: str
 
-    def __init__(self, value):
-        self.value = value
+#     def __init__(self, value):
+#         self.value = value
 
-    def __str__(self) -> str:
-        return self.value
+#     def __str__(self) -> str:
+#         return self.value
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return self.value, []
+#     # def _s_expr(self) -> tuple[str, list[Self]]:
+#     #     return self.value, []
 
-    @classmethod
-    def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        value = stream.pop()
-        if not (isinstance(value, String) or isinstance(value, Number)):
-            return
-        return cls(value.value)
+#     @classmethod
+#     def _try_lex(cls, stream: TokenStream) -> Lex | None:
+#         value = stream.pop()
+#         if value is None or value.type_ not in (TokenType.String, TokenType.Number):
+#             return
+#         return cls(value.value)
 
 
 class Atom(Lex):
     """Atom: Literal | Identifier | '(' Expression ')'"""
-    value: Union[Literal, Identifier, 'Expression']
+    value: Union[str, Identifier, 'Expression']
 
     def __init__(self, value):
         self.value = value
 
     def __str__(self) -> str:
-        return f"({self.value})" if isinstance(self.value, Expression) else self.value.value
+        return f"({self.value})" if isinstance(self.value, Expression) else self.value
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        if isinstance(stream.peek(), LParen):
+        if (x := stream.peek()) is not None and x.type_ == TokenType.LParen:
             stream.pop()
             if (body := Expression.try_lex(stream)) is None:
                 raise LexError("Expected `Expression`.")
-            stream.expect(RParen)
+            stream.expect(TokenType.RParen)
             return cls(body)
-        return Literal.try_lex(stream) or Identifier.try_lex(stream)
+        if not stream.eof and stream.peek().type_ in (TokenType.String, TokenType.Number):
+            return cls(stream.pop().value)
+        return Identifier.try_lex(stream)
 
 
-DEFAULT_BINDING_POWER = (1.0, 1.1)
-BINDING_POWER: dict[type[Token], tuple[int, int]] = {Asterisk: (5.0, 5.1)}
+PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10)}
+INFIX_BINDING_POWER: dict[str, tuple[int, int]] = {
+    ',': (1, 2),
+    '=': (3, 4),
+    # ...
+    '+': (5, 6),
+    '-': (5, 6),
+    # ...
+    '*': (7, 8),
+    '/': (7, 8),
+    # PREFIX -
+}
+POSTFIX_BINDING_POWER: dict[str, tuple[int, None]] = {'!': (11, None)}
 
 
 @lex_dataclass
-class Infix(Lex):
+class Operator(Lex):
     """Add: Atom '+' Atom;"""
-    OPERATORS = (Plus, Asterisk, Comma, Equals)
-    lhs: 'Atom'
-    rhs: 'Atom'
+    OPERATORS = (TokenType.Operator, TokenType.Comma, TokenType.Equals)
+    lhs: Union['Atom', 'Operator']
+    rhs: Union['Atom', 'Operator', None]
     oper: 'Token'
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return f"Infix<{self.oper.value}>", [self.lhs, self.rhs]
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        if self.lhs is None:
+            rhs = self.rhs.value if isinstance(self.rhs, Atom) else self.rhs
+            return "oper", [self.oper.value, rhs]
+
+        lhs = self.lhs.value if isinstance(self.lhs, Atom) else self.lhs
+        if self.rhs is None:
+            return "oper", [self.oper.value, lhs]
+        rhs = self.rhs.value if isinstance(self.rhs, Atom) else self.rhs
+        return f"oper", [self.oper.value, lhs, rhs]
 
     def __str__(self) -> str:
+        if self.lhs is None:
+            return f"{self.oper.value}{self.rhs}"
+        if self.rhs is None:
+            return f"{self.lhs}{self.oper.value}"
         return f"{self.lhs} {self.oper.value} {self.rhs}"
 
     def __repr__(self) -> str:
-        return f"Infix<{self.lhs!r}{self.oper.value}{self.rhs!r}>"
+        if self.lhs is None:
+            return f"Operator<{self.oper.value}{self.rhs!r}>"
+        if self.rhs is None:
+            return f"Operator<{self.lhs!r}{self.oper.value}>"
+        return f"Operator<{self.lhs!r}{self.oper.value}{self.rhs!r}>"
+
+    @classmethod
+    def try_lex(cls, istream: ImmutableTokenStream, min_bp=0) -> Optional['Lex']:
+        _LOG.debug("%sTrying to lex `%s` (min_bp=%d)", '| ' * istream.depth, cls.__name__, min_bp)
+        with istream.clone() as stream:
+            try:
+                ret = cls._try_lex(stream, min_bp)
+                if ret is not None:
+                    stream.commit()
+                    _LOG.debug("%sWas a `%s`!", 'y ' * istream.depth, cls.__name__)
+                return ret
+            except LexWarning as ex:
+                _LOG.warn("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
+            except EOFError as ex:
+                _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
+            except QuietStreamExpectError:
+                pass
 
     @classmethod
     def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
-        lhs: Atom | Infix | None
-        if (lhs := Atom.try_lex(stream)) is None:
+        lhs: Atom | Operator | None
+
+        if not stream.eof and stream.peek().type_ == TokenType.Operator:
+            # Prefix operator
+            oper = stream.pop()
+            _LOG.debug("%sPrefix is %s", '| ' * stream.depth, oper.value)
+            _, r_bp = PREFIX_BINDING_POWER[oper.value]
+            # TODO
+            if (lhs := cls.try_lex(stream, r_bp)) is None:
+                return
+            lhs = cls(None, lhs, oper)
+        elif (lhs := Atom.try_lex(stream)) is None:
+            _LOG.warn("%sLeft-hand side was not an Atom", 'x ' * stream.depth)
             return
 
         while True:
             oper = stream.peek()
-            if not any(isinstance(oper, o) for o in cls.OPERATORS):
+            if oper is None:
+                print("no oper")
                 break
-            l_bp, r_bp = BINDING_POWER.get(type(oper), DEFAULT_BINDING_POWER)
+            _LOG.debug("Oper is %r", oper)
+            if not any(oper.type_ == o for o in cls.OPERATORS):
+                print("oper not valid")
+                break
+            postfix = POSTFIX_BINDING_POWER.get(oper.value)
+            if postfix is not None:
+                l_bp, _ = postfix
+                if l_bp < min_bp:
+                    print("oper not strong enough")
+                    break
+                stream.pop()
+                lhs = cls(lhs, None, oper)
+                continue
+            l_bp, r_bp = INFIX_BINDING_POWER[oper.value]
             if l_bp < min_bp:
+                print("oper not strong enough")
                 break
             stream.pop()
             if (rhs := cls.try_lex(stream, r_bp)) is None:
+                print("rhs none")
                 break
-            lhs = cls(lhs, oper, rhs)
+            lhs = cls(lhs, rhs, oper)
 
         return lhs
 
     def check(self):
-        self.lhs.check()
-        self.rhs.check()
+        if self.lhs:
+            self.lhs.check()
+        if self.rhs is not None:
+            self.rhs.check()
 
 
 @lex_dataclass
 class Expression(Lex):
     """Expression := Add | Identifier | Literal;"""
-    value: Union[Infix, 'Atom']
+    value: Union[Operator, 'Atom']
 
     def __str__(self) -> str:
         return str(self.value)
@@ -247,7 +317,7 @@ class Expression(Lex):
     @classmethod
     @property
     def allowed(self) -> Iterable[type[Lex]]:
-        return [Infix, Atom]
+        return [Operator, Atom]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
@@ -269,9 +339,9 @@ class ReturnStatement(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        stream.expect(Return, quiet=True)
+        stream.expect(TokenType.ReturnKeyword, quiet=True)
         value = Expression.try_lex(stream)
-        stream.expect(Semicolon)
+        stream.expect(TokenType.Semicolon)
         return cls(value)
 
     def check(self):
@@ -291,14 +361,14 @@ class ParamList(Lex):
         inner = ', '.join(repr(x) for x in self.params)
         return f"Paramlist<{inner}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return 'ParamList' if self.params else 'ParamList (empty)', self.params
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return 'params', self.params
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        stream.expect(LParen, quiet=True)
+        stream.expect(TokenType.LParen, quiet=True)
 
-        if isinstance(stream.peek(), RParen):
+        if stream.peek().type_ == TokenType.RParen:
             stream.pop()
             return cls([])
 
@@ -306,13 +376,13 @@ class ParamList(Lex):
             raise LexError("Expected Identity.")
 
         params = [start]
-        while isinstance(stream.peek(), Comma):
+        while stream.peek().type_ == TokenType.Comma:
             stream.pop()
             if (next := Identity.try_lex(stream)) is None:
                 raise LexError("Expected Identity.")
             params.append(next)
 
-        stream.expect(RParen)
+        stream.expect(TokenType.RParen)
         return cls(params)
 
     def check(self):
@@ -323,7 +393,7 @@ class ParamList(Lex):
 @lex_dataclass
 class ArrayDef(Lex):
     """ArrayDef: '[' [Number] ']';"""
-    size: Number | None
+    size: Token | None
 
     def __str__(self) -> str:
         if self.size is not None:
@@ -333,27 +403,26 @@ class ArrayDef(Lex):
     def __repr__(self) -> str:
         return str(self)
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        size = 'unsized' if self.size is None else self.size.value
-        return f"ArrayDef<{size}>", []
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return f"is-array", [self.size.value] if self.size else []
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        stream.expect(LBracket, quiet=True)
+        stream.expect(TokenType.LBracket, quiet=True)
         size = None
-        if isinstance(stream.peek(), Number):
+        if stream.peek().type_ == TokenType.Number:
             size = stream.pop()
-        stream.expect(RBracket)
+        stream.expect(TokenType.RBracket)
         return cls(size)
 
     def check(self):
-        if '.' in self.size.value:
+        if self.size and '.' in self.size.value:
             _LOG.error("Array sizes cannot be decimals.")
 
 
 @lex_dataclass
 class Type_(Lex):
-    """Type_: Identifier [ ParamList ]"""
+    """Type_: Identifier [ ArrayDef | ParamList ]"""
 
     ident: Identifier
     mods: list[ParamList | ArrayDef]
@@ -368,8 +437,8 @@ class Type_(Lex):
         mods = ''.join(repr(m) for m in self.mods) if self.mods else ''
         return f"Type_<{self.ident.value}{mods}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return f"Type_<{self.ident}>", self.mods
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return "type", [self.ident] + self.mods
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
@@ -390,27 +459,28 @@ class Type_(Lex):
 class Identity(Lex):
     """Identity: Identifier ':' ('namespace' | Type_);"""
     lhs: Identifier
-    rhs: Union[Namespace, Type_]
+    rhs: Union[Literal_['namespace'], Type_]
 
     def __str__(self) -> str:
-        if isinstance(self.rhs, Namespace):
+        if isinstance(self.rhs, Token):
             return str(self.lhs) + ": namespace"
         return f"{self.lhs}: {self.rhs}"
 
     def __repr__(self) -> str:
         return f"Identity<{self.lhs!r}, {self.rhs!r}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return f"Identity<{self.lhs.value}>", [self.rhs]
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return f"identity", [self.lhs, self.rhs]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         if (lhs := Identifier.try_lex(stream)) is None:
             return
-        stream.expect(Colon)
+        stream.expect(TokenType.Colon)
 
-        if isinstance(stream.peek(), Namespace):
-            rhs = stream.pop()
+        if stream.peek().type_ == TokenType.NamespaceKeyword:
+            rhs = 'namespace'
+            stream.pop()
         elif (rhs := Type_.try_lex(stream)) is None:
             raise LexError("Expected a `Type_` or 'namespace'.")
 
@@ -418,7 +488,7 @@ class Identity(Lex):
 
     def check(self) -> None:
         self.lhs.check()
-        if not isinstance(self.rhs, Namespace):
+        if isinstance(self.rhs, Lex):
             self.rhs.check()
 
 
@@ -437,15 +507,15 @@ class Declaration(Lex):
         after = '' if self.initial is None else f'={self.initial!r}'
         return f"Declaration<{self.identity!r}{after}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return f"Declaration<{self.identity}>", [] if self.initial is None else [self.initial]
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return 'declaration', [self.identity] if self.initial is None else [self.identity, self.initial]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         if (identity := Identity.try_lex(stream)) is None:
             return
 
-        if not isinstance(stream.peek(), Equals):
+        if stream.peek().type_ != TokenType.Equals:
             return cls(identity)
 
         stream.pop()
@@ -483,7 +553,7 @@ class Statement(Lex):
         for t in cls.allowed:
             if (res := t.try_lex(stream)) is not None:
                 break
-        stream.expect(Semicolon)
+        stream.expect(TokenType.Semicolon)
         return cls(res)
 
     def check(self) -> None:
@@ -506,17 +576,28 @@ class Scope(Lex):
         inner = ', '.join(repr(x) for x in self.content)
         return f"Scope<{inner}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return "Scope", self.content
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return "scope", self.content
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        stream.expect(LBrace, quiet=True)
+        stream.expect(TokenType.LBrace, quiet=True)
         ret = []
-        while not isinstance(stream.peek(), RBrace) and ((res := ReturnStatement.try_lex(stream)) is not None or
-                                                         (res := Statement.try_lex(stream)) is not None):
-            ret.append(res)
-        stream.expect(RBrace)
+        while not stream.eof:
+            match stream.peek().type_:
+                case TokenType.RBrace:
+                    stream.pop()
+                    return cls(ret)
+                case TokenType.ReturnKeyword:
+                    ret.append(ReturnStatement.try_lex(stream))
+                    continue
+                case _:
+                    if (res := Statement.try_lex(stream)) is None:
+                        raise LexError("Expected `Statement`!")
+                    ret.append(res)
+                    continue
+
+        stream.expect(TokenType.RBrace)
         return cls(ret)
 
     def check(self):
@@ -547,14 +628,16 @@ class Document(Lex):
         inner = ', '.join(repr(s) for s in self.statements)
         return f"Document<{inner}>"
 
-    def _tree(self) -> tuple[str, list[Self]]:
-        return 'Document', self.statements
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return 'document', self.statements
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         statements: list[Statement] = []
         while (res := Statement.try_lex(stream)):
             statements.append(res)
+        if not stream.eof:
+            return None
         return cls(statements)
 
     def check(self) -> None:

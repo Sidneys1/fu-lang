@@ -3,7 +3,7 @@ from argparse import ArgumentParser, FileType
 from logging import getLogger, basicConfig, DEBUG
 
 from . import NAME
-from .stream import StrStream, ListStream
+from .stream import StrStream, TokenStream
 from .tokenizer import Token
 from .lexer import parse
 
@@ -25,8 +25,10 @@ def main(*args) -> int:
         tokens.append(token)
     if not str_stream.eof:
         print(f"Failed at: {str_stream.tail!r}")
+        return 1
+    print(str_stream.efficiency)
 
-    token_stream = ListStream(tokens)
+    token_stream = TokenStream(tokens)
 
     lex = parse(token_stream)
     if not token_stream.eof:
@@ -36,8 +38,10 @@ def main(*args) -> int:
         print(f'Failed to lex.')
         return 1
 
+    print(token_stream.efficiency)
+
     lex.unrepr()
-    lex.tree()
+    # print(lex.s_expr())
     print('```\n' + str(lex) + '```')
     lex.check()
 
