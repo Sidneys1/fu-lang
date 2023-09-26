@@ -1,8 +1,11 @@
-from typing import Optional, Union, Self
+from typing import Optional, Union, Self, TYPE_CHECKING
 
-from . import _LOG, Atom, Lex, LexWarning, lex_dataclass, _new_scope
+from . import _LOG, Atom, Lex, LexWarning, lex_dataclass, _SCOPE, StaticType
 from ..stream import QuietStreamExpectError
 from ..tokenizer import ImmutableTokenStream, SourceLocation, Token, TokenStream, TokenType
+
+if TYPE_CHECKING:
+    from . import Type_
 
 PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {
     '-': (None, 10),
@@ -160,14 +163,68 @@ class Operator(Lex):
 
         return lhs
 
+    def resolve_type(self) -> Optional['Type_']:
+        from . import Type_, ParamList
+        scope = _SCOPE.get()
+        assert (scope is not None)
+        match self.oper:
+            case Token(type=TokenType.Operator, value='!'):
+                # TODO: don't assume we're going to blindly do things here...
+                return self.rhs.resolve_type()
+            case Token(type=TokenType.LParen):
+                lhs_type = self.lhs.resolve_type()
+                print(f"calling on {lhs_type}")
+                if isinstance(lhs_type, Type_):
+                    if not lhs_type.mods:
+                        print('UGH')
+                        return
+                    if not isinstance(lhs_type.mods[-1], ParamList):
+                        print('UGH')
+                        return
+                    return lhs_type.ident.resolve_type()
+                assert isinstance(lhs_type, StaticType)
+                # if not lhs_type.callable:
+                #     return lhs_type.
+            case Token(type=TokenType.Dot):
+                lhs_type = self.lhs.resolve_type()
+                while isinstance(lhs_type, Type_):
+                    # Dissolve to a StaticType
+                    lhs_type = lhs_type.ident.resolve_type()
+                assert isinstance(lhs_type, StaticType)
+                with scope.merge(lhs_type.members) as scope:
+                    return self.rhs.resolve_type()
+            case _:
+                raise NotImplementedError(f"`Operator` {self.oper} has not implemented `resolve_type` (in {__file__})")
+
     def check(self):
-        _LOG.debug("Checkign operator")
+        _LOG.debug("Checking operator")
         if self.oper.type == TokenType.Dot:
+            from . import Type_
             lhs_type = self.lhs.resolve_type()
-            with _new_scope() as scope:
-                scope.merge(lhs_type.members)
+            # print(f"lhs: {lhs_type!r}")
+            if isinstance(lhs_type, Type_):
+                lhs_type = lhs_type.ident.resolve_type()
+                # print(f"In Type_: {lhs_type!r}")
+                # input()
+            scope = _SCOPE.get()
+            assert (scope is not None)
+            # print('???', lhs_type.members)
+            with scope.merge(lhs_type.members) as scope:
                 yield from self.lhs.check()
                 yield from self.rhs.check()
+                ...
+            return
+        if self.oper.type == TokenType.LParen:
+            from . import Type_
+            rhs_type = self.rhs.resolve_type()
+            print(f"rhs: {rhs_type!r}")
+            if isinstance(rhs_type, Type_):
+                rhs_type = rhs_type.ident.resolve_type()
+                print(f"In Type_: {rhs_type!r}")
+                input()
+            scope = _SCOPE.get()
+            assert (scope is not None)
+            print('???', self.lhs.resolve_type(), rhs_type)
 
         if self.lhs:
             _LOG.debug("Checking %r", self.lhs)

@@ -17,20 +17,10 @@ _TAB = '  '
 
 @_dataclass(frozen=True, slots=True)
 class StaticType:
+    name: str
     members: dict[str, Self] = field(default_factory=dict, kw_only=True)
     callable: bool = field(default=False, kw_only=True)
     parent: Self | None = field(default=None, kw_only=True)
-
-
-_VOID_TYPE = StaticType()
-_TYPE_TYPE = StaticType()
-_STATIC_ASSERT_TYPE = StaticType(callable=True)
-
-_BUILTINS: dict[str, StaticType] = {
-    'void': StaticType(),
-    'type': StaticType,
-    'static_assert': StaticType(callable=True)
-}
 
 
 @_dataclass(frozen=True, slots=True)
@@ -38,14 +28,29 @@ class ScopeContext:
     variables: dict[str, StaticType] = field(default_factory=dict, kw_only=True)
     parent: Self | None = field(default=None, kw_only=True)
 
+    @contextmanager
+    def merge(self, other: dict[str, StaticType]):
+        cur = _SCOPE.get()
+        val = ScopeContext(parent=cur)
+        token = _SCOPE.set(val)
+        try:
+            val.variables.update(other)
+            yield val
+        finally:
+            _SCOPE.reset(token)
+
     def in_scope(self, identifier: str) -> Optional[StaticType]:
         print(f'Searching for {identifier!r} in {self}')
         s = self
         while s:
             if identifier in s.variables:
-                return s.variables[identifier]
+                ret = s.variables[identifier]
+                if ret is None:
+                    _LOG.critical(f"Could not resolve runtime identifier {identifier}")
+                    input()
+                return ret
             s = s.parent
-        # return self.variables.get(identifier, None if self.parent is None else self.parent.in_scope(identifier))
+        _LOG.critical(f"Could not resolve runtime identifier {identifier}")
 
 
 _SCOPE: ContextVar[ScopeContext | None] = ContextVar('_SCOPE', default=None)
@@ -132,7 +137,7 @@ class Lex(ABC):
         ...
 
     def resolve_type(self) -> Optional['Type_']:
-        raise NotImplementedError(f"`resolve_type` is not implemented on `{self.__class__.__name__}`")
+        raise NotImplementedError(f"`resolve_type` is not implemented on `{self.__class__.__name__}` ({self!r})")
 
     def is_a(self, other: type) -> bool:
         return isinstance(self, other)
@@ -227,6 +232,15 @@ class Literal(Lex):
     def check(self) -> Iterator[CompilerNotice]:
         if False:
             yield None
+
+    def resolve_type(self) -> Optional['Type_']:
+        scope = _SCOPE.get()
+        assert scope is not None
+        match self.type:
+            case TokenType.String:
+                return scope.in_scope('str')
+            case _:
+                raise NotImplementedError(f"`resolve_type` not implemented for {self!r}")
 
     def _s_expr(self) -> tuple[str, list[Self]]:
         return str(self), []
@@ -382,7 +396,7 @@ class Type_(Lex):
     """Type_: Identifier [ ArrayDef | ParamList ]"""
 
     ident: Identifier
-    mods: list[ParamList | ArrayDef]
+    mods: list[ParamList | ArrayDef] = field(default_factory=list)
 
     def __str__(self) -> str:
         if not self.mods:
@@ -411,6 +425,7 @@ class Type_(Lex):
 
     def check(self):
         scope = _SCOPE.get()
+        print('!!!checking', self.ident.value, 'in', scope.variables)
         if not scope.in_scope(self.ident.value):
             yield CompilerNotice("Error", f"{self.ident.value!r} has not yet been defined.", self.ident.location)
         # yield from self.ident.check()
@@ -664,3 +679,16 @@ class Document(Lex):
                 if statement.value.is_a(
                         Declaration) and statement.value.initial is not None and statement.value.initial.is_a(Scope):
                     yield from statement.check()
+
+
+_TYPE_TYPE = StaticType(
+    'type',
+    members={'has': Type_(Identifier('bool'), [ParamList([Identity(Identifier('_'), Type_(Identifier('str')))])])})
+
+_BUILTINS: dict[str, StaticType] = {
+    'void': StaticType('void'),
+    'type': _TYPE_TYPE,
+    'static_assert': StaticType('static_assert', callable=True),
+    'bool': StaticType('bool'),
+    'str': StaticType('str'),
+}

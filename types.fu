@@ -1,0 +1,20 @@
+struct: void(t: type) = {
+    static_assert(t.dtor.visibility != "public");
+    static_assert(!t.has("op="));
+};
+static: void(m: member) = {
+    m.storage_class = "type";
+};
+
+[struct]
+foo: type = {
+    i: int;
+    [static] z: int;
+};
+bar: type<foo> = {
+    x: int() = { return this.i; };
+    y: int() = this.i;
+};
+
+[entrypoint]
+main: int(args: str[]) = {};
