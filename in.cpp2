@@ -1,5 +1,6 @@
-foo: namespace = {
-    main: int(args: str[]) = {
-        return 2!;
-    }; 
+Interface: void(t: type) = {
+    static_assert(!t.has("destructor"));
 };
+
+[Interface]
+foo: type = {};

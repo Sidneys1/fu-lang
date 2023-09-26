@@ -1,6 +1,8 @@
 from io import TextIOBase
 from contextlib import contextmanager
-from typing import TypeVar, Generic, Any
+from typing import TypeVar, Generic, Any, Iterator
+import inspect
+import traceback
 
 from . import StrStream as _StrStream, Stream as _Stream
 from .tokenizer import TokenType, Token
@@ -58,45 +60,31 @@ class StrStream(_StrStream):
             return None
         return self.__line[self.__line_pos:]
 
-    @contextmanager
-    def clone(self):
-        pos = self.__stream.tell()
-        stream = self.__class__(self.__stream, self.__pos, self.__line, self.__line_pos, self.__line_no,
-                                self.__depth + 1)
-        try:
-            yield stream
-        finally:
-            if not stream.__committed:
-                self.__stream.seek(pos)
-                self.__peeked += stream.__peeked
-                return
-            self.__pos = stream.__pos
-            self.__line = stream.__line
-            self.__line_pos = stream.__line_pos
-            self.__peeked += stream.__peeked
-            self.__popped += stream.__popped
-
     def peek(self) -> str:
-        self.__peeked += 1
         if self.eof:
+            # print('+ Peek<EOF>')
             return None
+        self.__peeked += 1
         ret = self.__line[self.__line_pos]
-        print('peek', ret)
+        # print(f'+ Peek<{ret}>')
+        # print('peek', ret)
         return ret
 
     def pop(self) -> str:
+        if self.eof:
+            # print('+ Pop<EOF>')
+            return None
         # self.__peeked += 1
         self.__popped += 1
-        if self.eof:
-            return None
         ret = self.__line[self.__line_pos]
+        # print(f'+ Pop<{ret}@{self.__line_no}:{self.__line_pos + 1}>')
         self.__pos += 1
         self.__line_pos += 1
         if self.__line_pos == len(self.__line):
             self.__line = self.__stream.readline()
             self.__line_pos = 0
             self.__line_no += 1
-        print('pop', ret)
+        # print('pop', ret)
         return ret
 
     def commit(self) -> None:
@@ -136,11 +124,14 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
     _depth: int = 0
     _peeked: int = 0
     _popped: int = 0
+    _generator: Iterator[T] | None
 
-    def __init__(self, items: list[T], index=0, depth=0) -> None:
+    def __init__(self, items: list[T], index=0, depth=0, generator=None) -> None:
         self._list = items
         self._index = index
         self._depth = depth
+        self._generator = generator
+        self._try_get_more()
 
     @property
     def eof(self) -> bool:
@@ -152,34 +143,55 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
 
     @contextmanager
     def clone(self):
-        clone = self.__class__(self._list, self._index, self._depth + 1)
+        clone = self.__class__(self._list, self._index, self._depth + 1, self._generator)
         try:
-            # print("Clone...")
             yield clone
         finally:
             if clone._committed:
                 self._index = clone._index
+                self._peeked += clone._peeked
                 self._popped += clone._popped
-            self._peeked += clone._peeked
-            # print("...Commit")
-            # else:
-            # print("...Rollback")
+            else:
+                self._peeked += clone._popped + clone._peeked
+                # if clone._popped > 0:
+                #     print('clone failed big-time:', clone.efficiency)
+
+    def _try_get_more(self):
+        if self._generator is None:
+            return
+        if self._index != len(self._list):
+            return
+        try:
+            self._list.append(next(self._generator))
+        except StopIteration:
+            self._generator = None
+
+    _who_called = {}
 
     def peek(self) -> T | None:
-        self._peeked += 1
         if self.eof:
             return None
-        # print(f'Peek<{self.__list[self.__index]}>')
-        return self._list[self._index]
+        stack = inspect.stack()[1].frame
+
+        if (caller_class := stack.f_locals.get('self', stack.f_locals.get('cls', None))) is not None:
+            if caller_class not in ListStream._who_called:
+                ListStream._who_called[caller_class] = 0
+            ListStream._who_called[caller_class] += 1
+
+        self._peeked += 1
+        ret = self._list[self._index]
+        self._try_get_more()
+        return ret
 
     def pop(self) -> T | None:
-        # self._peeked += 1
-        self._popped += 1
         if self.eof:
             return None
+        # self._peeked += 1
+        self._popped += 1
         self._index += 1
-        # print(f'Pop<{self.__list[self.__index - 1]}>')
-        return self._list[self._index - 1]
+        ret = self._list[self._index - 1]
+        self._try_get_more()
+        return ret
 
     def commit(self) -> None:
         self._committed = True
@@ -195,7 +207,7 @@ class TokenStream(ListStream[Token]):
         if self.eof:
             raise EOFError()
         peek = self.pop()
-        if peek.type_ != type_:
+        if peek.type != type_:
             if quiet:
                 raise QuietStreamExpectError(type_, peek)
             raise StreamExpectError(type_, peek)

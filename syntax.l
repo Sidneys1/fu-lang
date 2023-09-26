@@ -1,6 +1,7 @@
 Identifier: [a-zA-Z];
 Number: [0-9](_.0-9)+;
 Literal: String | Number;
+Comment: '/' '*' ... '*' '/' | '//' ... '\n';
 
 Atom: Literal | Identifier | '(' Expression ')';
 Infix: Atom ('+'|'-'|'/'|'*'|',') Atom;

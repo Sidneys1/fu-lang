@@ -1,0 +1,17 @@
+// comment
+tutorial: namespace = {
+[Entrypoint]
+main: int(args: str[]) = {
+    count: int(thing: array) = { return thing.length; };
+    return count(args);
+};
+
+};
+
+[CompileTime]
+Interface: void(t: type) = {
+    assert(!t.has("destructor"));
+};
+
+[Interface]
+foo: type = {};

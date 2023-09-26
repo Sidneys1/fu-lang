@@ -1,20 +1,37 @@
-from typing import Protocol, ContextManager, Generic, TypeVar, TypeAlias, Iterator
-from dataclasses import dataclass
+from typing import Protocol, ContextManager, Generic, TypeVar, TypeAlias, Self
+from dataclasses import dataclass, field
+from contextvars import ContextVar
 
 NAME = __name__
 
+SourceFile: ContextVar[str | None] = ContextVar('SourceFile', default=None)
+
 
 @dataclass(frozen=True, slots=True)
-class TokenPosition:
+class SourceLocation:
     seek: tuple[int, int]
     lines: tuple[int, int]
     columns: tuple[int, int]
+    file: str = field(default_factory=SourceFile.get)
 
     def __str__(self) -> str:
         if self.lines[0] == self.lines[1]:
             columns = self.columns[0] if self.columns[0] == self.columns[1] else f"{self.columns[0]}-{self.columns[1]}"
-            return f"{self.lines[0]}:{columns}"
-        return f"{self.lines[0]}:{self.columns[0]} to {self.lines[1]}:{self.columns[1]}"
+            return f"{self.file}, line {self.lines[0]}:{columns}"
+        return f"{self.file}, lines {self.lines[0]}:{self.columns[0]} to {self.lines[1]}:{self.columns[1]}"
+
+    @classmethod
+    def from_to(cls, start: Self, end: Self) -> Self | None:
+        if start is None or end is None:
+            return
+        return cls((start.seek[0], end.seek[1]), (start.lines[0], end.lines[1]), (start.columns[0], end.columns[1]))
+
+
+@dataclass(frozen=True, slots=True)
+class CompilerNotice:
+    level: str
+    message: str
+    location: SourceLocation
 
 
 T = TypeVar('T', covariant=True)

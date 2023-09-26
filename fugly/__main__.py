@@ -1,8 +1,10 @@
 import sys
 from argparse import ArgumentParser, FileType
-from logging import getLogger, basicConfig, DEBUG
+from io import SEEK_SET
+from logging import getLogger, basicConfig, DEBUG, INFO
+from pathlib import Path
 
-from . import NAME
+from . import NAME, SourceLocation, CompilerNotice, SourceFile
 from .stream import StrStream, TokenStream
 from .tokenizer import Token
 from .lexer import parse
@@ -17,20 +19,16 @@ def main(*args) -> int:
     parser = ArgumentParser(NAME)
     parser.add_argument('FILE', type=FileType())
     ns = parser.parse_args(args)
+    SourceFile.set(str(Path(ns.FILE.name).absolute().relative_to(Path.cwd())))
     str_stream = StrStream(ns.FILE)
 
-    tokens = []
-    for token in Token.token_generator(str_stream):
-        print(" -", token)
-        tokens.append(token)
-    if not str_stream.eof:
-        print(f"Failed at: {str_stream.tail!r}")
-        return 1
-    print(str_stream.efficiency)
-
-    token_stream = TokenStream(tokens)
+    token_stream = TokenStream([], generator=Token.token_generator(str_stream))
 
     lex = parse(token_stream)
+    peeks, pops = str_stream.efficiency
+    print(f"Chars: {peeks=}, {pops=}, {pops/(pops+peeks):0.2%}")
+    peeks, pops = token_stream.efficiency
+    print(f"Tokens: {peeks=}, {pops=}, {pops/(pops+peeks):0.2%}")
     if not token_stream.eof:
         print(f"Failed at: {token_stream.peek()}")
         return 1
@@ -38,12 +36,52 @@ def main(*args) -> int:
         print(f'Failed to lex.')
         return 1
 
-    print(token_stream.efficiency)
+    for klass, calls in sorted(token_stream._who_called.items(), key=lambda t: t[1], reverse=True):
+        print(klass.__name__, calls)
+
+    print('```\n' + str(lex) + '```')
 
     lex.unrepr()
-    # print(lex.s_expr())
-    print('```\n' + str(lex) + '```')
-    lex.check()
+
+    def error_range(error: CompilerNotice):
+        ns.FILE.seek(0, SEEK_SET)
+        line_no = 1
+        print("\n...", error.location.file, '...')
+        if error.location.lines[0] > 1:
+            line = ns.FILE.readline()
+            while line_no < (error.location.lines[0] - 1):
+                line_no += 1
+                line = ns.FILE.readline()
+            if (line := line.rstrip()):
+                print(f"\033[2m{line_no:03d}", '|', line, '\033[0m')
+
+        length = error.location.columns[1] - error.location.columns[0] + 1
+
+        line = ns.FILE.readline().rstrip()
+        line_no += 1
+        color = {'info': 96, 'warning': 33, 'warn': 33, 'error': 91}.get(error.level.lower(), 45)
+        print(f"\033[2m{line_no:03d}", '|\033[0m\033[1m', line, end=f'\033[0m\033[{color}m')
+        if len(line) == length:
+            print(' <--', error.message, '\033[0m\033[2m', error.location)
+        else:
+            print('\n',
+                  ' ' * (error.location.columns[0] + 5),
+                  '^' * length,
+                  ' ',
+                  f"({error.level}) {error.message} \033[0m\033[2m({error.location})",
+                  sep='')
+        line_no += 1
+        line = ns.FILE.readline().rstrip()
+        if line:
+            print(f"\033[0m\033[2m{line_no:03d}", '|', line, "\033[0m")
+        else:
+            print('\033[0m', end='')
+
+    for error in list(lex.check()):
+        if error.level in ('Note', ):
+            print(f"\033[92m{error.level:>7}: {error.message} \033[0m({error.location})")
+        else:
+            error_range(error)
 
     return 0
 
