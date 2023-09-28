@@ -1,8 +1,10 @@
 from typing import Protocol, ContextManager, Generic, TypeVar, TypeAlias, Self
 from dataclasses import dataclass, field
 from contextvars import ContextVar
+from logging import getLogger
 
 NAME = __name__
+MODULE_LOGGER = getLogger(NAME)
 
 SourceFile: ContextVar[str | None] = ContextVar('SourceFile', default=None)
 
@@ -27,11 +29,17 @@ class SourceLocation:
         return cls((start.seek[0], end.seek[1]), (start.lines[0], end.lines[1]), (start.columns[0], end.columns[1]))
 
 
-@dataclass(frozen=True, slots=True)
-class CompilerNotice:
+class CompilerNotice(Exception):
     level: str
     message: str
     location: SourceLocation
+    extra: Self | None = None
+
+    def __init__(self, level: str, message: str, location: SourceLocation, extra: Self | None = None):
+        self.level = level
+        self.message = message
+        self.location = location
+        self.extra = extra
 
 
 T = TypeVar('T', covariant=True)

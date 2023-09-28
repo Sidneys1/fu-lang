@@ -4,10 +4,16 @@ Literal: String | Number;
 Comment: '/' '*' ... '*' '/' | '//' ... '\n';
 
 Atom: Literal | Identifier | '(' Expression ')';
-Infix: Atom ('+'|'-'|'/'|'*'|',') Atom;
-Expression: Infix | Atom;
+Operator:
+    Atom ('+'|'-'|'/'|'*'|','|'.') Atom
+| ('-'|'!') Atom
+| Atom '(' ExpList ')'
+| Atom '[' Expression ']'
+;
+Expression: Operator | Atom;
 ReturnStatement: 'return' Expression;
 ParamList: '(' Identity [',' Identity[...]] ')';
+ExpList: Expression [',' Expression]
 ArrayDef: '[' [Number] ']';
 Type_: Identifier ( ArrayDef | ParamList )*;
 Identity: Identifier ':' ('namespace' | Type_);

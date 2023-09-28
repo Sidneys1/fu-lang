@@ -1,0 +1,6 @@
+example: namespace = {
+    [Entrypoint]
+    main: iznt(args: str[]) = {
+        return 0;
+    };
+};

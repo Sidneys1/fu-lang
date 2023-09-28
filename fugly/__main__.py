@@ -43,41 +43,51 @@ def main(*args) -> int:
 
     lex.unrepr()
 
-    def error_range(error: CompilerNotice):
+    def error_range(error: CompilerNotice, indent: str = ''):
         ns.FILE.seek(0, SEEK_SET)
+
+        file = f"{error.location.file}:" if error.location.file is not None else ''
+
         line_no = 1
-        print("\n...", error.location.file, '...')
+        line_color = 2 if indent else 1
         if error.location.lines[0] > 1:
             line = ns.FILE.readline()
             while line_no < (error.location.lines[0] - 1):
                 line_no += 1
                 line = ns.FILE.readline()
-            if (line := line.rstrip()):
-                print(f"\033[2m{line_no:03d}", '|', line, '\033[0m')
+            if not indent and (line := line.rstrip()):
+                loc = f"{file}{line_no}"
+                print(f"{indent}\033[2m{loc:>10}", '|', line, '\033[0m')
 
         length = error.location.columns[1] - error.location.columns[0] + 1
 
         line = ns.FILE.readline().rstrip()
         line_no += 1
-        color = {'info': 96, 'warning': 33, 'warn': 33, 'error': 91}.get(error.level.lower(), 45)
-        print(f"\033[2m{line_no:03d}", '|\033[0m\033[1m', line, end=f'\033[0m\033[{color}m')
+        color = {'info': 96, 'warning': 33, 'warn': 33, 'error': 91, 'note': 2}.get(error.level.lower(), 45)
+        loc = f"{file}{line_no}"
+        print(f"{indent}\033[2m{loc:>10}", f'|\033[0m\033[{line_color}m', line, end=f'\033[0m\033[{color}m')
         if len(line) == length:
             print(' <--', error.message, '\033[0m\033[2m', error.location)
         else:
             print('\n',
-                  ' ' * (error.location.columns[0] + 5),
+                  indent,
+                  ' ' * (error.location.columns[0] + 12),
                   '^' * length,
                   ' ',
-                  f"({error.level}) {error.message} \033[0m\033[2m({error.location})",
+                  f"{error.level}: {error.message} \033[0m\033[2m({error.location})",
                   sep='')
+        if error.extra is not None:
+            error_range(error.extra, indent=(' ' * (14 + length)) + '>')
         line_no += 1
         line = ns.FILE.readline().rstrip()
-        if line:
-            print(f"\033[0m\033[2m{line_no:03d}", '|', line, "\033[0m")
+        if not indent and line:
+            loc = f"{file}{line_no}"
+            print(f"{indent}\033[0m\033[2m{loc:>10}", '|', line, "\033[0m")
         else:
             print('\033[0m', end='')
 
-    for error in list(lex.check()):
+    from .analyzer import check_program
+    for error in check_program([lex]):
         if error.level in ('Note', ):
             print(f"\033[92m{error.level:>7}: {error.message} \033[0m({error.location})")
         else:

@@ -1,6 +1,6 @@
 from typing import Union, Self, TYPE_CHECKING
 
-from . import Expression, Identifier, Identity, Lex, LexError, MetadataList, lex_dataclass, _new_scope, Type_, ParamList, CompilerNotice
+from . import Expression, Identifier, Identity, Lex, LexError, MetadataList, lex_dataclass, _tab, Namespace  #, _new_scope, Type_, ParamList, CompilerNotice
 from ..tokenizer import SourceLocation, TokenStream, TokenType
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ class Declaration(Lex):
         build = ''
 
         if self.metadata:
-            build += f"[{self.metadata}]\n"
+            build += f"[{self.metadata}]\n{_tab()}"
 
         build += str(self.identity)
 
@@ -63,54 +63,80 @@ class Declaration(Lex):
             # Maybe dotted?
             if (first_id := Identifier.try_lex(stream)) is None:
                 return
+            print(first_id)
             id_stack.append(first_id)
-            tok = stream.peek()
-            if tok is None or tok.type != TokenType.Dot:
-                return
             start = tok.location
-            while tok is not None and tok.type == TokenType.Dot:
+            while (tok := stream.peek()) is not None and tok.type == TokenType.Dot:
                 stream.pop()
-                if (identity := Identity.try_lex(stream)) is not None:
-                    break
                 if (next_id := Identifier.try_lex(stream)) is None:
                     raise LexError("Trailing Dot, expected `Identifier` or `Identity`.")
                 id_stack.append(next_id)
-                tok = stream.peek()
+                print(first_id, *id_stack, sep='.')
+            stream.expect(TokenType.Colon)
+            stream.expect(TokenType.NamespaceKeyword)
         else:
             start = identity.location
 
         if (tok := stream.peek()) is not None and tok.type == TokenType.Equals:
             stream.pop()
 
-            if identity.rhs == 'namespace':
-                if (val := Scope.try_lex(stream)) is None:
-                    print(val)
-                    raise LexError("Namespaces must be initialized with `Scope`.")
-            elif (val := (Scope.try_lex(stream) or Expression.try_lex(stream))) is None:
+            if id_stack:
+                stream.expect(TokenType.LBrace)
+                decls = []
+                while (tok := stream.peek()) is not None and tok.type != TokenType.RBrace:
+                    if (decl := Declaration.try_lex(stream)) is None:
+                        raise LexError("Expected `Declaration` or `}`")
+                    decls.append(decl)
+                    stream.expect(TokenType.Semicolon)
+                end = stream.expect(TokenType.RBrace).location
+                return Namespace([i.value for i in id_stack],
+                                 decls,
+                                 metadata,
+                                 location=SourceLocation.from_to(start, end))
+            elif id_stack:
+                raise LexError("Only namespaces may be defined with multi-level names.")
+
+            if (val := (Scope.try_lex(stream) or Expression.try_lex(stream))) is None:
                 raise LexError("Expected a `Scope` or `Expression`!")
 
             end = val.location
             return cls(identity, val, metadata=metadata, location=SourceLocation.from_to(start, end))
 
         ret = cls(identity, val, metadata=metadata, location=SourceLocation.from_to(start, end))
-        for id in reversed(id_stack):
-            ret = cls(Identity(id, 'namespace'),
-                      Scope([Statement(ret)]),
-                      location=SourceLocation.from_to(id.location, end))
         return ret
 
+    """
     def check(self) -> None:
+        if self.identity.rhs == 'namespace':
+            return
+        from . import _SCOPE, StaticType
+        scope = _SCOPE.get()
+        assert scope is not None
+
+        decl_type = StaticType.from_type(self.identity.rhs)
         if self.metadata is not None:
             yield from self.metadata.check()
+            for identifier in self.metadata.metadata:
+                id_type = identifier.resolve_type()
+                first_param = id_type.callable[0]
+                if decl_type != first_param:
+                    input(
+                        f"\n\n\n\n\n{decl_type.callable[0] == first_param.callable[0]}\n{decl_type.callable[0]}\n{first_param.callable[0]}"
+                    )
+                    raise CompilerNotice(
+                        'Error',
+                        f"Metadata `{identifier.value}({first_param.name})` used on non-applicable type `{decl_type.name}`.",
+                        identifier.location)
         yield from self.identity.check()
 
         if self.initial is not None:
             if self.identity.rhs.is_a(Type_) and self.identity.rhs.mods and self.identity.rhs.mods[-1].is_a(ParamList):
                 plist: ParamList = self.identity.rhs.mods[-1]
-                with _new_scope() as scope:
+                with _new_scope(self.identity.lhs.value) as scope:
                     for t in plist.params:
                         if scope.in_scope(t.lhs.value):
                             yield CompilerNotice("Warning", f"{t.lhs.value!r} shadows variable in parent scope.",
                                                  t.lhs.location)
                         scope.variables[t.lhs.value] = t.rhs
                     yield from self.initial.check()
+    """

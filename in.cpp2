@@ -1,6 +1,8 @@
 Interface: void(t: type) = {
-    static_assert(!t.has("destructor"));
+    assert(!t.has("destructor"));
 };
 
 [Interface]
-foo: type = {};
+foo: void() = {
+    Interface();
+};

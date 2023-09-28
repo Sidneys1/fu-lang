@@ -1,53 +1,56 @@
 from abc import ABC
-from typing import Iterable, Optional, Union, Self, Literal as Literal_, Iterator, Any
+from typing import Any, Iterable, Optional, Union, Self, Literal as Literal_, Iterator, ClassVar
 from logging import getLogger
 from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass as _dataclass, field
 
-from .. import CompilerNotice
+from .. import CompilerNotice, MODULE_LOGGER
 from ..tokenizer import TokenType, Token, TokenStream, ImmutableTokenStream, SourceLocation
 from ..stream import StreamExpectError, QuietStreamExpectError
 
-_LOG = getLogger(__name__)
+_LOG = MODULE_LOGGER.getChild(__name__)
 
 _FORMATTING_DEPTH: ContextVar[int] = ContextVar('_FORMATTING_DEPTH', default=0)
 _TAB = '  '
-
-
-@_dataclass(frozen=True, slots=True)
-class StaticType:
-    name: str
-    members: dict[str, Self] = field(default_factory=dict, kw_only=True)
-    callable: bool = field(default=False, kw_only=True)
-    parent: Self | None = field(default=None, kw_only=True)
-
-
-@_dataclass(frozen=True, slots=True)
+"""
+@_dataclass(frozen=True, slots=True, kw_only=True)
 class ScopeContext:
-    variables: dict[str, StaticType] = field(default_factory=dict, kw_only=True)
+    name: str
+    variables: dict[str, Union[StaticType, 'Type_']] = field(default_factory=dict, kw_only=True)
     parent: Self | None = field(default=None, kw_only=True)
+
+    @property
+    def fqdn(self) -> str:
+        s = self
+        r = self.name
+        while s is not None:
+            r = f"{s.name}.{r}"
+            s = s.parent
+        return r
 
     @contextmanager
     def merge(self, other: dict[str, StaticType]):
         cur = _SCOPE.get()
-        val = ScopeContext(parent=cur)
+        val = ScopeContext(name=None, parent=cur)
         token = _SCOPE.set(val)
         try:
+            _LOG.debug(f"Merging {other} in")
             val.variables.update(other)
             yield val
         finally:
             _SCOPE.reset(token)
 
     def in_scope(self, identifier: str) -> Optional[StaticType]:
-        print(f'Searching for {identifier!r} in {self}')
+        _LOG.debug(f'Searching for {identifier!r} in {self}')
         s = self
         while s:
             if identifier in s.variables:
                 ret = s.variables[identifier]
-                if ret is None:
-                    _LOG.critical(f"Could not resolve runtime identifier {identifier}")
-                    input()
+                if isinstance(ret, Type_):
+                    ret = StaticType.from_type(ret)
+                    if ret is not None:
+                        s.variables[identifier] = ret
                 return ret
             s = s.parent
         _LOG.critical(f"Could not resolve runtime identifier {identifier}")
@@ -56,16 +59,17 @@ class ScopeContext:
 _SCOPE: ContextVar[ScopeContext | None] = ContextVar('_SCOPE', default=None)
 
 
+
 @contextmanager
-def _new_scope():
+def _new_scope(name: str):
     cur = _SCOPE.get()
-    val = ScopeContext(variables=_BUILTINS) if cur is None else ScopeContext(parent=cur)
+    val = ScopeContext(name=name, variables=_BUILTINS) if cur is None else ScopeContext(name=name, parent=cur)
     token = _SCOPE.set(val)
     try:
         yield val
     finally:
         _SCOPE.reset(token)
-
+"""
 
 lex_dataclass = _dataclass(repr=False, slots=True, frozen=True)
 
@@ -125,6 +129,9 @@ class Lex(ABC):
             except QuietStreamExpectError:
                 pass
 
+    def static_execute(self) -> Any:
+        raise NotImplementedError(f"Type `{self.__class__.__name__}` does not implement `static_execute`!")
+
     @classmethod
     def expect(cls, istream: ImmutableTokenStream) -> 'Lex':
         ret = cls.try_lex(istream)
@@ -136,7 +143,7 @@ class Lex(ABC):
     def _try_lex(cls, stream: TokenStream) -> Optional['Lex']:
         ...
 
-    def resolve_type(self) -> Optional['Type_']:
+    def resolve_type(self) -> Optional['StaticType']:
         raise NotImplementedError(f"`resolve_type` is not implemented on `{self.__class__.__name__}` ({self!r})")
 
     def is_a(self, other: type) -> bool:
@@ -198,8 +205,10 @@ class Identifier(Lex):
     def _s_expr(self) -> tuple[str, list[Self]]:
         return f'"{self.value}"', []
 
-    def resolve_type(self) -> Optional['Type_']:
-        return _SCOPE.get().in_scope(self.value)
+    def resolve_type(self) -> Optional['StaticType']:
+        ret = _SCOPE.get().in_scope(self.value)
+        _LOG.debug(f"Resolved {self} to {ret}")
+        return ret
 
     def check(self) -> Iterator[CompilerNotice]:
         # todo: check that this identifier is in scope
@@ -233,12 +242,14 @@ class Literal(Lex):
         if False:
             yield None
 
-    def resolve_type(self) -> Optional['Type_']:
+    def resolve_type(self) -> Optional['StaticType']:
         scope = _SCOPE.get()
         assert scope is not None
         match self.type:
             case TokenType.String:
                 return scope.in_scope('str')
+            case TokenType.Number:
+                return scope.in_scope('int')  # TODO: wut
             case _:
                 raise NotImplementedError(f"`resolve_type` not implemented for {self!r}")
 
@@ -362,6 +373,41 @@ class ParamList(Lex):
 
 
 @lex_dataclass
+class ExpList(Lex):
+    """CallList: Expression [',' Expression[...]];"""
+    values: list[Expression]
+
+    def __str__(self) -> str:
+        inner = ', '.join(str(x) for x in self.values)
+        return f"({inner})"
+
+    def __repr__(self) -> str:
+        inner = ', '.join(repr(x) for x in self.values)
+        return f"CallList<{inner}>"
+
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return 'params', self.values
+
+    @classmethod
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if (tok := stream.peek()) is None or tok.type == TokenType.RParen or (first :=
+                                                                              Expression.try_lex(stream)) is None:
+            return
+
+        params = [first]
+
+        while (tok := stream.peek()) is not None and tok.type == TokenType.Comma and stream.pop() and (
+                next := Expression.try_lex(stream)) is not None:
+            params.append(next)
+
+        return cls(params, location=SourceLocation.from_to(params[0].location, params[-1].location))
+
+    def check(self):
+        for param in self.values:
+            yield from param.check()
+
+
+@lex_dataclass
 class ArrayDef(Lex):
     """ArrayDef: '[' [Number] ']';"""
     size: Token | None
@@ -406,7 +452,7 @@ class Type_(Lex):
 
     def __repr__(self) -> str:
         mods = ''.join(repr(m) for m in self.mods) if self.mods else ''
-        return f"Type_<{self.ident.value}{mods}>"
+        return f"Type_<{self.ident.value}, {mods}>"
 
     def _s_expr(self) -> tuple[str, list[Self]]:
         return "type", [self.ident] + self.mods
@@ -434,14 +480,38 @@ class Type_(Lex):
 
 
 @lex_dataclass
+class Namespace(Lex):
+    """Doesn't parse itself, is parsed by Declaration."""
+    name: list[str]
+    """Namespace name (may represent multiple nested namespaces)."""
+    declarations: list['Declaration']
+    metadata: Optional['MetadataList']
+
+    def __str__(self) -> str:
+        name = '.'.join(self.name)
+        if not self.declarations:
+            return f"{name}: namespace = {{}};"
+        with _indent() as tab:
+            inner = tab + f'\n{tab}'.join(str(x) for x in self.declarations)
+        return f"{name}: namespace = {{\n{inner}\n{_tab()}}}"
+
+    def __repr__(self) -> str:
+        before = '' if self.metadata is None else f"{self.metadata!r}, "
+        after = '' if not self.declarations else f", {', '.join(repr(x) for x in self.declarations)}"
+        return f"Namespace<{before}{'.'.join(self.name)}{after}>"
+
+    def _s_expr(self) -> tuple[str, list[Self]]:
+        return "namespace", [".".join(
+            self.name)] + ([] if self.metadata is None else [".".join(self.name), self.metadata]) + self.declarations
+
+
+@lex_dataclass
 class Identity(Lex):
     """Identity: Identifier ':' ('namespace' | Type_);"""
     lhs: Identifier
-    rhs: Union[Literal_['namespace'], Type_]
+    rhs: Type_
 
     def __str__(self) -> str:
-        if isinstance(self.rhs, Token):
-            return str(self.lhs) + ": namespace"
         return f"{self.lhs}: {self.rhs}"
 
     def __repr__(self) -> str:
@@ -458,13 +528,11 @@ class Identity(Lex):
         if (tok := stream.pop()) is None or tok.type != TokenType.Colon:
             raise LexWarning("Expected Colon")
         if stream.peek().type == TokenType.NamespaceKeyword:
-            rhs = 'namespace'
-            end = stream.pop().location
-        else:
-            rhs = Type_.try_lex(stream)
-            if rhs is None:
-                raise LexError("Expected a `Type_` or 'namespace'.")
-            end = rhs.location
+            return
+        rhs = Type_.try_lex(stream)
+        if rhs is None:
+            raise LexError("Expected a `Type_`.")
+        end = rhs.location
 
         return cls(lhs, rhs, location=SourceLocation.from_to(start, end))
 
@@ -491,20 +559,10 @@ class MetadataList(Lex):
         for i in self.metadata:
             yield from i.check()
             type = scope.in_scope(i.value)
-            if type.ident.value != "void":
-                yield CompilerNotice("Error", "Metadata functions must return void.", type.ident.location)
-
-            if not type.mods or not isinstance(type.mods[-1], ParamList):
-                yield CompilerNotice("Error", "Metadata functions must be callable.", type.location)
-            else:
-                plist = type.mods[-1]
-                if not plist.params or (isinstance(plist.params[0].rhs, Type_)
-                                        and plist.params[0].rhs.ident.value != 'type'):
-                    loc = plist.location if not plist.params else plist.params[0].rhs.location
-                    yield CompilerNotice("Error", "Metadata functions must take `type` as their first parameter.", loc)
-                elif other := plist.params[1:]:
-                    yield CompilerNotice('Error', f"Metadata lists current don't support additional parameters.",
-                                         SourceLocation.from_to(other[0].location, other[-1].location))
+            if type is None:
+                raise CompilerNotice("Error", f"Could not resolve `{i.value}`.", i.location)
+            if not type.callable or type.evals_to != _VOID_TYPE:
+                raise CompilerNotice("Error", "Metadata functions must be callable and return `void`.", i.location)
 
     @classmethod
     def _try_lex(cls, stream: TokenStream):
@@ -556,7 +614,10 @@ class Statement(Lex):
 
     def check(self) -> None:
         _LOG.debug("Checking statement %r", self.value)
-        yield from self.value.check()
+        try:
+            yield from self.value.check()
+        except CompilerNotice as ex:
+            yield ex
 
 
 @lex_dataclass
@@ -603,7 +664,7 @@ class Scope(Lex):
         if not self.content:
             yield CompilerNotice("Info", "Empty scope?", self.location)
             return
-        with _new_scope() as scope:
+        with _new_scope('') as scope:
             # First populate
             _LOG.debug("populating scope")
             for statement in self.content:
@@ -631,38 +692,40 @@ class Scope(Lex):
 @lex_dataclass
 class Document(Lex):
     """Document: Declaration* EOF;"""
-    statements: list[Statement]
+    declarations: list[Declaration | Namespace]
 
     def __str__(self) -> str:
-        return ''.join(str(s) for s in self.statements)
+        return ''.join(str(s) + ";\n" for s in self.declarations)
 
     def __repr__(self) -> str:
-        inner = ', '.join(repr(s) for s in self.statements)
+        inner = ', '.join(repr(s) for s in self.declarations)
         return f"Document<{inner}>"
 
     def _s_expr(self) -> tuple[str, list[Self]]:
-        return 'document', self.statements
+        return 'document', self.declarations
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        statements: list[Statement] = []
-        while (res := Statement.try_lex(stream)):
-            statements.append(res)
+        declarations: list[Declaration] = []
+        while (res := Declaration.try_lex(stream)):
+            declarations.append(res)
+            stream.expect(TokenType.Semicolon)
+
         if not stream.eof:
             return None
 
-        if not statements:
-            location = None
+        if not declarations:
+            location = SourceLocation((0, 0), (1, 1), (1, 1), stream)
         else:
-            location = SourceLocation.from_to(statements[0].location, statements[-1].location)
+            location = SourceLocation.from_to(declarations[0].location, declarations[-1].location)
 
-        return cls(statements, location=location)
+        return cls(declarations, location=location)
 
     def check(self):
-        with _new_scope() as scope:
+        with _new_scope('') as scope:
             # First populate
             _LOG.debug("Populating document scope")
-            for statement in self.statements:
+            for statement in self.declarations:
                 if not isinstance(statement.value, Declaration):
                     yield CompilerNotice("Error", f"Documents can only contain Declarations.", statement.location)
                 else:
@@ -675,20 +738,7 @@ class Document(Lex):
                     if statement.value.initial is not None and not statement.value.initial.is_a(Scope):
                         statement.value.initial.check()
             # Then check nested scopes
-            for statement in self.statements:
+            for statement in self.declarations:
                 if statement.value.is_a(
                         Declaration) and statement.value.initial is not None and statement.value.initial.is_a(Scope):
                     yield from statement.check()
-
-
-_TYPE_TYPE = StaticType(
-    'type',
-    members={'has': Type_(Identifier('bool'), [ParamList([Identity(Identifier('_'), Type_(Identifier('str')))])])})
-
-_BUILTINS: dict[str, StaticType] = {
-    'void': StaticType('void'),
-    'type': _TYPE_TYPE,
-    'static_assert': StaticType('static_assert', callable=True),
-    'bool': StaticType('bool'),
-    'str': StaticType('str'),
-}
