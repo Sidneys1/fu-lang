@@ -1,0 +1,111 @@
+@startuml
+skinparam groupInheritance 2
+skinparam nodesep 10
+' skinparam ranksep 10
+
+abstract TypeBase {
+    Base class for all typing
+    (runtime or static).
+    __
+}
+
+entity void <<TypeBase>> {
+    Void is its own
+    unique sizeless type.
+}
+TypeBase <-- void
+
+abstract ComposedType {
+    Represents a type built
+    of other types.
+    __
+}
+
+TypeBase <|-- ComposedType
+
+abstract IntegralType {
+    Supertype for certain
+    value types.
+    __
+}
+
+TypeBase <|-- IntegralType
+
+abstract IntType {
+    Describes a type that is
+    an integer number (ℤ).
+    __
+}
+
+IntegralType <|-- IntType
+
+abstract EnumType {
+    Describes a type that
+    is a set of scoped
+    integral literals.
+    __
+}
+
+IntType <|- EnumType
+
+entity bool <u32> << EnumType >> {
+    false=0
+    true=1
+}
+
+EnumType <-- bool
+
+package Integers {
+    entity i8
+    entity u8
+    entity i16
+    entity u16
+    entity i32
+    entity u32
+    entity i64
+    entity u64
+
+    entity size_t
+    entity usize_t
+
+    u32 #.. bool
+}
+
+IntType <-- Integers
+
+abstract FloatType {
+    Describes a IEEE
+    floating point number.
+    __
+}
+
+IntegralType <-left- FloatType
+
+package Floats {
+    entity f32
+    entity f64
+}
+
+FloatType <-- Floats
+
+abstract GenericType<TypeBase: Ts...> {
+    Represents a type with
+    unresolved generic
+    parameters.
+    __
+}
+
+ComposedType <|-- GenericType
+
+abstract ArrayType<T> {
+    Describes an array
+    of elements.
+    __
+}
+
+GenericType <-- ArrayType
+
+entity "u8[]" as u8_arr <u8> <<ArrayType>>
+ArrayType <-- u8_arr
+
+@enduml

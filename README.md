@@ -101,9 +101,8 @@ C-style strings (null-terminated strings) are not supported. Instead:
 
 <h2  align="center">Examples</h2>
 
-#### Orthogonality Examples
-
-##### Declarations of form <samp>name: type</samp>
+<details>
+<summary><samp>foo: bar</samp> (<q>foo <i>is-a</i> bar</q>)</summary>
 
 <table align="center">
 <tr><td>Variables</td>
@@ -115,6 +114,7 @@ bar: int = 0;
 ```
 
 </td>
+<td>Read as: <q><samp>foo</samp> <i>is-a</i> <samp>str</samp>.</q></td>
 </tr>
 <!--  -->
 <tr><td title="Namespaces must be initialized with a body.">
@@ -127,6 +127,7 @@ example.impl: namespace = {
 };
 ```
 </td>
+<td>Read as: <q><samp>example.impl</samp> <i>is-a</i> <samp>namespace</samp>.</q></td>
 </tr>
 <!--  -->
 <tr><td>Functions</td>
@@ -134,12 +135,34 @@ example.impl: namespace = {
 
 ```cpp
 main: void(args: str[]) = {
-    print("hello, world!");
 };
 ```
 </td>
+<td>Read as: <q><samp>main</samp> <i>is-a</i> <samp>void</samp> <i>when-called-with</i>: <samp>args</samp> <i>is-a</i> <samp>str</samp>-<i>array</i>.</q></td>
+</tr>
+<!--  -->
+<tr><td>Types</td>
+<td width="500px">
+
+```cpp
+foo: type;
+bar: type = {
+    this: foo;
+};
+
+```
+</td>
+<td>
+Read as:
+<ul>
+<li><q><samp>foo</samp> <i>is-a</i> <samp>type</samp></q></li>
+<li><q><samp>bar</samp> <i>is-a</i> <samp>type</samp>, <samp>this</samp> <i>is-a</i> <samp>foo</samp></q><br/>(i.e., <samp>bar</samp> <i>is-a</i> <samp>type</samp> that inherits <samp>foo</samp>)</li>
+</ul>
+</td>
 </tr>
 </table>
+
+</details>
 
 [^nmspc-init-reqd]: Namespaces *must* be initialized with a body.
 [^dotted-nmspc]: Namespaces with dotted names is syntactically equivalent to defining them separately:

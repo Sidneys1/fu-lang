@@ -11,7 +11,9 @@
         "**/CVS": true,
         "**/.DS_Store": true,
         "**/Thumbs.db": true,
-        "**/__pycache__": true
+        "**/__pycache__": true,
+        "**/.mypy_cache": true,
+        "**/.pyvenv": true
     },
     "mypy-type-checker.importStrategy": "fromEnvironment",
     "workbench.colorCustomizations": {

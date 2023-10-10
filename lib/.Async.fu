@@ -1,0 +1,116 @@
+
+Exception: type;
+InvalidStateEx: type<Exception>;
+
+// Represents a value that may materialize at a future point.
+Future: type`T` = {
+    _is_set: bool = false;
+    _is_ex: bool = false;
+    _value: T;
+    _ex: Exception;
+    _callbacks: List<void(T)> = new();
+
+    value: T(this) = {
+        if (!._is_set) throw InvalidStateEx();
+        if (._is_ex) throw ._ex;
+        return ._value;
+    };
+
+    is_done: bool(this) = { return ._is_set; };
+
+    has_value: bool(this) = {
+        return ._is_set and !._is_ex;
+    };
+
+    has_exception: bool(this) = {
+        return ._is_set and ._is_ex;
+    };
+
+    accept: void(this, value: T) = {
+        if (._is_set) throw InvalidStateEx();
+        ._is_set = true;
+        ._value = value;
+    };
+
+    reject: void(this, ex: Exception) = {
+        if (._is_set) throw InvalidStateEx();
+        ._is_set = true;
+        ._is_ex = true;
+        ._ex = ex;
+    };
+
+    on_done: void(this, cb: void(T)) = {
+        ._callbacks.append(cb);
+    };
+};
+
+// Similarly, this is value that is being resolved by a coroutine.
+Task: type`T` = {
+    this: Future<T>;
+
+    next: void(this) = {...};
+    run_sync: T(this) = {...};
+};
+
+/* example:
+
+async_example: int(a: str) = {
+    b: int = await foo();
+    c: int = bar();
+    d: int = await baz();
+    return a.length + b + c + d;
+};
+// becomes
+
+async_example_state: type = {
+    this: Task<int>;
+    op=: this(a: str) = {
+        .a = a;
+    };
+    state: u8 = 0;
+    a: str;
+    b: int;
+    b_task: Task<int>;
+    c: int;
+    d: int;
+    next: void(this) = {
+        if (.state == 0) {
+            .b_task = foo();
+            .b_task.next();
+            .state++;
+            if (.b_task.is_done()) .state++;
+            return;
+        }
+        if (.state == 1) {
+            .b_task.next();
+            if (.b_task.is_done()) {
+                .state++;
+                .b = .b_task.value();
+                .b_task = null;
+            }
+            return;
+        }
+        if (.state == 2) {
+            .c = bar();
+            .b_task = baz();
+            .b_task.next();
+            state++;
+            if (.b_task.is_done()) .state++;
+            return;
+        }
+        if (.state == 3) {
+            .b_task.next();
+            if (.b_task.is_done()) {
+                .d = .b_task.value();
+                .b_task = null;
+                this.accept(.a.length + .b + .c + .d);
+            }
+            return;
+        }
+    };
+};
+async_example: async_example_state(a: str) = {
+    return async_example_state(a);
+};
+
+*/

@@ -1,8 +1,0 @@
-Interface: void(t: type) = {
-    assert(!t.has("destructor"));
-};
-
-[Interface]
-foo: void() = {
-    Interface();
-};

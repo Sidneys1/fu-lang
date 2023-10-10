@@ -1,0 +1,12 @@
+x: type<T> = {
+    a: T;
+    op=: this(a: T) = {
+        .a = a;
+    };
+};
+
+main: u8() = {
+    1 + -2;
+    y: x<u8> = (1);
+    return y.a;
+};

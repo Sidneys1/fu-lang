@@ -1,0 +1,53 @@
+std: namespace;
+
+iterator: interface<T> = {
+    value: T();
+
+    op++: void();
+    op=: this(this);
+
+    is_end: bool();
+};
+
+iterable: interface<T> = {
+    start: iterator<T>;
+    end: iterator<T>;
+};
+
+slice: type<T> = {
+    this: iterable<T>;
+    start: iterator<T>;
+    end: iterator<T>;
+
+    over: iterable<T>;
+};
+
+view: type<F, T> = {
+    view_iterator: type<F, T> = {
+        this: iterator<T>;
+
+        value: T() = {
+            copy: iterator<F> = .underlying;
+            .mod_func(.copy);
+        };
+
+        op++: void() => .mod_func(.underlying, .underlying);
+        op=: this(this); // Default copy constructor.
+
+        is_end: bool() => .underlying.is_end(); // Pass through to underlying.
+
+        op=: this(over: iterator<F>, mod_func: T(inout iterator<F>)) = {
+            .underlying = over;
+            .mod_func = mod_func;
+        };
+
+        mod_func: T(iterator<F>);
+        underlying: iterator<F>;
+    };
+
+    this: iterable<T>;
+    start: view_iterator<F, T>;
+    end: view_iterator<F, T>;
+
+    over: iterable<F>;
+};
