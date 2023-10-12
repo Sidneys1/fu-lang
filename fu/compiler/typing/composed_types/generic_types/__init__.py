@@ -109,6 +109,8 @@ def _rebuild_generic_type(t: 'GenericType',
 
     all_params = dict(t.generic_params)
     all_params.update(updated_generics)
+    if inherits is None or t not in inherits:
+        inherits = (t, *inherits) if inherits is not None else  (t, )
 
     if still_generic or preserve_inheritance:
         from .type_ import TypeType
@@ -124,7 +126,7 @@ def _rebuild_generic_type(t: 'GenericType',
             del kwargs['inherits']
             del kwargs['indexable']
             del kwargs['callable']
-        ret = type(t)(**kwargs)
+        ret = type(t)(t._name, **kwargs)
         mode = f'still-generic-on `{'`, `'.join(not_updated_generics)}`' if still_generic else 'fully-resolved'
         if preserve_inheritance:
             mode += f' (but preserving inheritance from {type(t).__name__})'

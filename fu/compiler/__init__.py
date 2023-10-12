@@ -32,7 +32,7 @@ class SourceLocation:
 class CompilerNotice(Exception):
     level: str
     message: str
-    location: SourceLocation
+    location: SourceLocation | None
     extra: list[Self]
 
     def __init__(self, level: str, message: str, location: SourceLocation, extra: list[Self] | None = None):

@@ -1,4 +1,4 @@
-from typing import Self, Literal
+from typing import Self, Literal, Any
 
 from dataclasses import dataclass, field, replace
 
@@ -14,6 +14,9 @@ class TypeBase:
     callable: tuple[tuple['TypeBase', ...], 'TypeBase'] | None = None
     members: dict[str, 'TypeBase'] = field(default_factory=dict)
     const: bool = field(compare=False, default=False)
+
+    def __instancecheck__(self, __instance: Any) -> bool:
+        return isinstance(__instance, TypeBase) and __instance.inherits is not None and self in __instance.inherits
 
     def as_const(self) -> Self:
         return replace(self, const=True)

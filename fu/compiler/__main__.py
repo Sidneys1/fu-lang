@@ -69,9 +69,9 @@ def main(*args) -> int:
     # for klass, calls in sorted(token_stream._who_called.items(), key=lambda t: t[1], reverse=True):
     #     print(klass.__name__, calls)
 
-    print('```\n' + str(lex) + '```')
+    # print('```\n' + str(lex) + '```')
 
-    lex.unrepr()
+    # lex.unrepr()
 
     # input()
 
@@ -80,6 +80,17 @@ def main(*args) -> int:
     from .analyzer import check_program
     docs.append(lex)
     errors = list(check_program(docs))
+
+    if all(error.level.lower() not in ('error', 'critical') for error in errors):
+        from .compile import compile
+        bytecode = b''
+
+        def _():
+            nonlocal bytecode
+            bytecode = yield from compile()
+
+        errors.extend(_())
+
     files = set(error.location.file if error.location is not None else None for error in errors)
     errors_by_file = {
         file:
@@ -102,14 +113,16 @@ def main(*args) -> int:
             if error != errors[-1]:
                 print('\033[0;2m-----+\033[0m')
 
-    if (ret := sum(1 if error.level.lower() in ('error', 'critical') else 0 for error in errors)):
-        return ret
+    if error_count := sum(1 if error.level.lower() in ('error', 'critical') else 0 for error in errors):
+        return error_count
 
-    # from .scripting import evaluate
-    # from .analyzer import GLOBAL_SCOPE, StaticVariableDecl
-    # main = GLOBAL_SCOPE.members.get('main')
-    # assert isinstance(main, StaticVariableDecl), f"Main was a {type(main).__name__}"
-    # evaluate(main, argv=unknown_args)
+    from ..bytecode.vm import VM
+    vm = VM(bytecode, unknown_args)
+    try:
+        vm.run()
+    except VM.VmTerminated as ex:
+        print(f'% VM terminated with {ex.exit_code}')
+        return ex.exit_code
     return 0
 
 

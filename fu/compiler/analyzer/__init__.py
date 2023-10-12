@@ -83,9 +83,9 @@ def check_program(program: Iterable[Document]):
             ALL_ELEMENTS.append(cur)
             to_add.extend(cur._s_expr()[1])
 
-    # _LOG.debug(f"All elements (after): {element_count:,} (vs {len(ALL_ELEMENTS):,} before)")
+    _LOG.debug(f"All elements (after): {len(ALL_ELEMENTS):,} (vs {element_count:,} before)")
     # input()
-    yield CompilerNotice('Debug', f"All elements (after): {len(ALL_ELEMENTS):,} (vs {element_count:,} before)", None)
+    # yield CompilerNotice('Debug', f"All elements (after): {len(ALL_ELEMENTS):,} (vs {element_count:,} before)", None)
 
     for document in program:
         yield from _check(document)
@@ -340,18 +340,19 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 _LOG.debug(f"Found definition for builtin `{name}`.")
                 var_type = BUILTINS[name]
             else:
-                print(f'\n\n\nxxxx\n\n{element}')
+                # print(f'\n\n\nxxxx\n\n{element}')
                 var_type = type_from_lex(element.identity.rhs, scope)
 
             if element.initial is not None and not isinstance(element.initial, (Scope, ExpList)):
-                rhs_type = _resolve_type(element.initial)
+                rhs_type = _resolve_type(element.initial, want=var_type)
                 if isinstance(var_type, TypeType) and rhs_type == var_type.underlying:
                     var_type = var_type.underlying
                 elif var_type != rhs_type:
-                    yield CompilerNotice('Error',
-                                         f"`{element.identity}` is being initialized with a `{rhs_type.name}`.",
-                                         element.location)
-                    return
+                    try:
+                        _check_implicit_conversion(rhs_type, var_type, element.initial.location)
+                    except CompilerNotice as ex:
+                        yield ex
+                        return
             # Add to current scope
 
             _LOG.debug(f"Adding {name} to {scope.fqdn} as {var_type.name}")
@@ -428,7 +429,7 @@ def _resolve_type(element: Lex,
 
     scope = StaticScope.current()
 
-    _LOG.debug(f"Resolving type of {element!r} in {scope.fqdn}")
+    # _LOG.debug(f"Resolving type of {element!r} in {scope.fqdn}")
     match element:
         case ReturnStatement():
             if element.value is None:
@@ -521,7 +522,7 @@ def _resolve_type(element: Lex,
                 # rhs_decl = rhs_type
                 rhs_type = rhs_type.type
 
-            input(f"\n\n{lhs_type.name} {element.oper.value} {rhs_type.name}")
+            # input(f"\n\n{lhs_type.name} {element.oper.value} {rhs_type.name}")
             match lhs_type, rhs_type:
                 case IntType(), IntType():
                     assert isinstance(lhs_type, IntType) and isinstance(rhs_type, IntType)
@@ -569,6 +570,8 @@ def _resolve_type(element: Lex,
                     return SIZE_TYPE.as_const() if want_signed or element.value[0] == '-' else USIZE_TYPE.as_const()
                 case _:
                     raise NotImplementedError()
+        case Type_():
+            return type_from_lex(element, scope)
         case _:
             raise CompilerNotice('Note', f"Type resolution for `{type(element).__name__}` is not implemented!",
                                  element.location)
@@ -722,6 +725,8 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
                 "Error",
                 f"Type of {element.identity.lhs.value!r} is not callable ({lhs_type}) but is initialized with a body.",
                 element.identity.location)
+        elif not element.initial.content:
+            yield CompilerNotice('Warning', "Method initialized with an empty body.", element.initial.location)
 
         params = element.identity.rhs.mods[-1]
         assert isinstance(params, ParamList)
@@ -973,7 +978,8 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
                     content.append(c)
             if different:
                 return replace(element, content=content)
-        case Literal() | Operator(oper=Token(type=TokenType.Dot)) | Operator(oper=Token(type=TokenType.Equals)):
+        case Literal() | Operator(oper=Token(type=TokenType.Dot)) | Operator(oper=Token(
+            type=TokenType.Equals)) | Identifier():
             """Ignore"""
         case _:
             yield CompilerNotice('Note', f"Don't know how to optimize `{type(element).__name__}`.", element.location)
@@ -983,7 +989,7 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
 # @count_calls
 def _check(element: Lex) -> Iterator[CompilerNotice]:
     scope = StaticScope.current()
-    _LOG.debug(f"Checking {type(element).__name__} in {scope.fqdn}")
+    # _LOG.debug(f"Checking {type(element).__name__} in {scope.fqdn}")
     if element in CHECKED_ELEMENTS:
         raise RuntimeError("Element checked more than once!")
     CHECKED_ELEMENTS.append(element)
@@ -1006,13 +1012,20 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             # except Exception as ex:
             #     yield CompilerNotice('Critical', f"Unknown error when checking {element!r}: {ex}", element.location)
         case ReturnStatement():
-            if element.value is not None:
-                yield from _check(element.value)
+            if element.value is None:
+                if scope.return_type.type != VOID_TYPE:
+                    yield CompilerNotice('Error',
+                                         f"Empty return in a method that returns `{scope.return_type.type.name}`.",
+                                         element.location)
+                return
+            yield from _check(element.value)
             try:
-                returned_type = _resolve_type(element)
+                returned_type = _resolve_type(element.value, want=scope.return_type.type)
                 assert not isinstance(returned_type, StaticScope)
                 try:
-                    _check_implicit_conversion(returned_type, scope.return_type.type, element.location)
+                    _check_implicit_conversion(
+                        returned_type, scope.return_type.type,
+                        element.value.location if element.value is not None else element.location)
                 except CompilerNotice as ex:
                     yield ex
                     return
@@ -1180,12 +1193,11 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             if isinstance(rhs_type, StaticVariableDecl):
                 rhs_decl = rhs_type
                 rhs_type = rhs_type.type
-            _check_implicit_conversion(rhs_type, lhs_member_decl.type, element.location)
-            # if rhs_type != lhs_member_decl.type:
-            #     yield CompilerNotice(
-            #         'Error',
-            #         f"Cannot assign a value of type `{rhs_type.name}` to a variable of type `{lhs_member_decl.type.name}`.",
-            #         element.location)
+            try:
+                _check_implicit_conversion(rhs_type, lhs_member_decl.type, element.location)
+            except CompilerNotice as ex:
+                yield ex
+                return
         case Namespace():
             with ExitStack() as ex:
                 for name in element.name:
@@ -1210,7 +1222,11 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                                                                 'First return statement here.',
                                                                 location=first_return.location)
                                              ])
-                yield from _check(content)
+                try:
+                    yield from _check(content)
+                except CompilerNotice as ex:
+                    yield ex
+                    return
         case Operator():
             yield CompilerNotice(
                 'Note',

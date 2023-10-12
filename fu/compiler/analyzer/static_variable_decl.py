@@ -27,7 +27,7 @@ class StaticVariableDecl:
 
     @property
     def name(self) -> str:
-        return f"{self.lex.name}: {self.type.name}"
+        return f"{self.lex.identity.lhs}: {self.type.name}"
 
     def as_const(self) -> Self:
         return replace(self, type=replace(self.type, const=True))

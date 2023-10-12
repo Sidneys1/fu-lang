@@ -1,4 +1,4 @@
-from typing import TypeVar, Iterator
+from typing import TypeVar, Iterator, Iterable, TypeGuard, Any, Type, Sequence
 from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass as _dataclass, field
@@ -15,3 +15,7 @@ def set_contextvar(var: ContextVar[T], value: T) -> Iterator[T]:
         yield value
     finally:
         var.reset(reset)
+
+
+def is_sequence_of(s: Sequence[Any], _type: Type[T]) -> TypeGuard[Sequence[T]]:
+    return all(isinstance(x, _type) for x in s)

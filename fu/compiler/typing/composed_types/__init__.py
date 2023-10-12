@@ -1,3 +1,4 @@
+from typing import Any
 from ...tokenizer import SpecialOperatorType
 
 from .. import TypeBase

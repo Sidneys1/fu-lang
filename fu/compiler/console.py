@@ -81,5 +81,6 @@ def render_error(error: CompilerNotice, indent: str = ''):
             print(f"{indent}\033[0;2m{line_no:>4}", '|', line, "\033[0m")
         else:
             print('\033[0m', end='')
-    except:
+    finally:
         fp.close()
+        print('\033[m', end='', flush=True)

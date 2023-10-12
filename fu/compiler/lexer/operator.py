@@ -6,7 +6,7 @@ from ..stream import QuietStreamExpectError
 from ..tokenizer import ImmutableTokenStream, SourceLocation, Token, TokenStream, TokenType
 
 if TYPE_CHECKING:
-    from . import Type_, ExpList
+    from . import ExpList, Identifier
 
 PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10), '!': (None, 10), '.': (None, 10)}
 INFIX_BINDING_POWER: dict[str, tuple[int, int]] = {
@@ -31,8 +31,8 @@ POSTFIX_BINDING_POWER: dict[str, tuple[int, None]] = {
 class Operator(Lex):
     """Add: Atom '+' Atom;"""
     OPERATORS = (TokenType.Operator, TokenType.Dot, TokenType.LParen, TokenType.LBracket, TokenType.Equals)
-    lhs: Union['Atom', 'Operator']
-    rhs: Union['Atom', 'Operator', 'ExpList', None]
+    lhs: Union['Atom', 'Identifier', 'Operator', None]
+    rhs: Union['Atom', 'Identifier', 'Operator', 'ExpList', None]
     oper: 'Token'
 
     def _s_expr(self) -> tuple[str, list[Self]]:
