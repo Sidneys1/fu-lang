@@ -1,1 +1,2 @@
-disabled=inconsistent-return-statements
+[MESSAGES CONTROL]
+disable=inconsistent-return-statements,logging-fstring-interpolation,wrong-import-position,import-outside-toplevel

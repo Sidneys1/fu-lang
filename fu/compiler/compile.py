@@ -1,22 +1,21 @@
+from contextvars import ContextVar
+from contextvars import Token as ContextVarToken
+from dataclasses import dataclass
+from enum import Enum
 from logging import getLogger
-from types import TracebackType
-# from contextlib import COnte
-from typing import ContextManager, Optional, Generator, TypeAlias, Iterator, Iterable
-from contextvars import ContextVar, Token
-from dataclasses import field, dataclass
+from typing import ContextManager, Generator, Iterable, Iterator, Optional
 
-from ..bytecode import OpcodeEnum, u16, NumericTypes
+from ..virtual_machine.bytecode import BytecodeTypes, NumericTypes, OpcodeEnum, u16
+from ..types import TypeBase
+from ..types.composed_types.generic_types import GenericType
+from ..types.integral_types import *
 
 from . import CompilerNotice
-from .util import is_sequence_of
-from .analyzer import GLOBAL_SCOPE, StaticVariableDecl, _resolve_type, StaticScope
+from .analyzer.scope import GLOBAL_SCOPE, AnalyzerScope, StaticVariableDecl, _CURRENT_ANALYZER_SCOPE
 from .analyzer.static_type import type_from_lex
-from .analyzer.static_scope import _SCOPE as _CURRENT_STATIC_SCOPE
-from .typing import TypeBase
-from .typing.composed_types.generic_types import GenericType
-from .typing.integral_types import *
+from .lexer import (Declaration, Identifier, Identity, Lex, Operator, ParamList, ReturnStatement, Scope, Statement)
 from .tokenizer import Token, TokenType
-from .lexer import Lex, Declaration, Scope, ParamList, Identity, Statement, ReturnStatement, Operator, Atom, Identifier, Literal
+from .util import is_sequence_of
 
 _LOG = getLogger(__package__)
 
@@ -28,35 +27,35 @@ def make_ref(t: TypeBase) -> GenericType:
     return REF_TYPE.resolve_generic_instance(T=t, preserve_inheritance=True)  # type: ignore
 
 
-BytecodeTypes: TypeAlias = OpcodeEnum | NumericTypes | int | bytes | tuple['BytecodeTypes', ...]
-
-
 # @dataclass(frozen=True, kw_only=True, slots=True)
 class CompileScope(ContextManager):
     name: str
     parent: Optional['CompileScope']
-    _reset_tok: Token | None = None
-    _reset_static_tok: Token | None = None
-    static_scope: StaticScope
+    _reset_tok: ContextVarToken | None = None
+    _reset_static_tok: ContextVarToken | None = None
+    static_scope: AnalyzerScope
 
     def __init__(self, name: str, root=False):
         self.name = name
         self.parent = CompileScope.current() if not root else None
         if self.parent is None:
-            self.static_scope = StaticScope.current()
+            self.static_scope = AnalyzerScope.current()
         else:
-            self.static_scope = self.parent.static_scope.get_child(name)
+            static_scope = self.parent.static_scope.get_child(name)
+            if static_scope is None:
+                raise RuntimeError()
+            self.static_scope = static_scope
             assert self.static_scope is not None
 
     def __enter__(self):
         self._reset_tok = _CURRENT_COMPILE_SCOPE.set(self)
-        self._reset_static_tok = _CURRENT_STATIC_SCOPE.set(self.static_scope)
+        self._reset_static_tok = _CURRENT_ANALYZER_SCOPE.set(self.static_scope)
         return self
 
     def __exit__(self, *args) -> None:
-        assert self._reset_tok is not None
+        assert self._reset_tok is not None and self._reset_static_tok is not None
         _CURRENT_COMPILE_SCOPE.reset(self._reset_tok)
-        _CURRENT_STATIC_SCOPE.reset(self._reset_static_tok)
+        _CURRENT_ANALYZER_SCOPE.reset(self._reset_static_tok)
         self._reset_static_tok = None
         self._reset_tok = None
 
@@ -143,63 +142,6 @@ def compile() -> Generator[CompilerNotice, None, bytes | None]:
         else:
             _LOG.debug(x)
     return bytes(to_bytes(all))
-
-
-# def compile_expression(expression, target_type, target_value):
-#     _LOG.debug(f'Compiling expression: {str(expression).strip()}, result in {target_type!r} {target_value!r}')
-#     scope = CompileScope.current()
-#     match expression:
-#         case Literal(type=TokenType.Number):
-#             yield ParamType.u16
-#             yield target_type
-#             yield expression.to_value()
-#             yield target_value
-#         case Operator(oper=Token(type=TokenType.Dot)):
-#             # assume lhs is identifier
-#             if not isinstance(expression.lhs, Identifier):
-#                 raise NotImplementedError()
-#             name = expression.lhs.value
-#             assert name in scope.args or name in scope.stack
-#             haystack = scope.args if name in scope.args else scope.stack
-#             if expression.lhs.value in haystack:
-#                 index = -1
-#                 for i, (k, v) in enumerate(haystack.items()):
-#                     if k == expression.lhs.value:
-#                         index = i
-#                         lhs_type = v
-#                         break
-#                 lhs = ParamType.NearBase if not v.reference_type else 'deref', -(index +
-#                                                                                  1) if name in scope.args else index
-
-#             if not isinstance(expression.rhs, Identifier):
-#                 raise NotImplementedError()
-#             name = expression.rhs.value
-#             index = -1
-#             for i, (k, v) in enumerate(lhs_type.members.items()):
-#                 if k == name:
-#                     index = i
-#                     lhs_type = v
-#                     break
-#             # rhs_type = lhs_type.members[name]
-#             yield f"{lhs}[{index}] # {expression}"
-#             # yield from lhs
-#             # yield name
-#         case Identifier():
-#             name = expression.value
-#             haystack = scope.args if name in scope.args else scope.stack
-#             if name in haystack:
-#                 index = -1
-#                 for i, (k, v) in enumerate(haystack.items()):
-#                     if k == name:
-#                         index = i
-#                         lhs_type = v
-#                         break
-#                 lhs = (ParamType.NearBase, index) if not v.reference_type else ('deref', -(index + 1))
-#             yield f"{OpcodeEnum.MOV} {lhs[0]} {target_type} {lhs[1]} {target_value} --{expression}"
-#         case _:
-#             raise RuntimeError(f"Don't know how to compile {type(expression).__name__}!")
-
-from enum import Enum
 
 
 class Storage(Enum):

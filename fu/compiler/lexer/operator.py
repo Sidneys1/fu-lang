@@ -1,12 +1,12 @@
 from typing import Optional, Union, Self, TYPE_CHECKING
-from dataclasses import replace
+from dataclasses import replace, dataclass
 
-from . import _LOG, Atom, Lex, LexWarning, lex_dataclass  #, _SCOPE, StaticType, CompilerNotice
+from . import _LOG, Lex, LexWarning, TokenStream, ImmutableTokenStream
 from ..stream import QuietStreamExpectError
-from ..tokenizer import ImmutableTokenStream, SourceLocation, Token, TokenStream, TokenType
+from ..tokenizer import SourceLocation, Token, TokenType
 
 if TYPE_CHECKING:
-    from . import ExpList, Identifier
+    from . import ExpList, Identifier, Atom
 
 PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10), '!': (None, 10), '.': (None, 10)}
 INFIX_BINDING_POWER: dict[str, tuple[int, int]] = {
@@ -27,7 +27,7 @@ POSTFIX_BINDING_POWER: dict[str, tuple[int, None]] = {
 }
 
 
-@lex_dataclass
+@dataclass(repr=False, slots=True, frozen=True)
 class Operator(Lex):
     """Add: Atom '+' Atom;"""
     OPERATORS = (TokenType.Operator, TokenType.Dot, TokenType.LParen, TokenType.LBracket, TokenType.Equals)
@@ -36,6 +36,7 @@ class Operator(Lex):
     oper: 'Token'
 
     def _s_expr(self) -> tuple[str, list[Self]]:
+        from .atom import Atom
         match self.oper.type:
             case TokenType.LParen:
                 oper = 'call'
@@ -102,6 +103,7 @@ class Operator(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
+        from .atom import Atom
         lhs: Atom | Operator | None
 
         if not stream.eof and stream.peek().type in (TokenType.Operator, TokenType.Dot):
@@ -113,10 +115,9 @@ class Operator(Lex):
             # TODO
             if (lhs := cls.try_lex(stream, r_bp)) is None:
                 return
-            from . import Literal
-            if isinstance(
-                    lhs,
-                    Literal) and lhs.type == TokenType.Number and oper.type == TokenType.Operator and oper.value == '-':
+            from .lexed_literal import LexedLiteral
+            if isinstance(lhs, LexedLiteral
+                          ) and lhs.type == TokenType.Number and oper.type == TokenType.Operator and oper.value == '-':
                 lhs = replace(lhs, value='-' + lhs.value, location=SourceLocation.from_to(oper.location, lhs.location))
             else:
                 lhs = cls(None, lhs, oper, location=SourceLocation.from_to(oper.location, lhs.location))

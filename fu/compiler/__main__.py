@@ -1,12 +1,11 @@
 import sys
 from argparse import ArgumentParser, FileType
-from io import SEEK_SET
 from logging import getLogger, basicConfig, DEBUG, INFO, ERROR
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Protocol
 
 from . import NAME, SourceLocation, CompilerNotice, SourceFile
-from .analyzer.static_scope import _PARSING_BUILTINS
+from .analyzer.scope import _PARSING_BUILTINS
 from .stream import StrStream, TokenStream
 from .tokenizer import Token
 from .lexer import parse, Document
@@ -34,13 +33,21 @@ def load_std() -> Iterator[Document]:
         yield load_file(path)
 
 
+class ParsedArgs(Protocol):
+    run: bool
+    verbose: bool
+    FILE: FileType
+
+
 def main(*args) -> int:
     parser = ArgumentParser(NAME)
-    parser.add_argument('-v', action='store_true')
+    parser.add_argument('-r', '--run', help="Compile and run.", action='store_true')
+    parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('FILE', type=FileType())
+    ns: ParsedArgs
     ns, unknown_args = parser.parse_known_args(args)
 
-    if ns.v:
+    if ns.verbose:
         basicConfig(level=DEBUG)
     else:
         getLogger(__package__ + ".lexer").setLevel(level=ERROR)
@@ -116,13 +123,15 @@ def main(*args) -> int:
     if error_count := sum(1 if error.level.lower() in ('error', 'critical') else 0 for error in errors):
         return error_count
 
-    from ..bytecode.vm import VM
-    vm = VM(bytecode, unknown_args)
-    try:
-        vm.run()
-    except VM.VmTerminated as ex:
-        print(f'% VM terminated with {ex.exit_code}')
-        return ex.exit_code
+    if ns.run:
+        from ..virtual_machine import VM
+        vm = VM(bytecode, unknown_args)
+        try:
+            vm.run()
+        except VM.VmTerminated as ex:
+            print(f'% VM terminated with {ex.exit_code}')
+            return ex.exit_code
+
     return 0
 
 

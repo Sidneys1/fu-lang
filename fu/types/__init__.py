@@ -1,4 +1,4 @@
-from typing import Self, Literal, Any
+from typing import Self, Literal as Literal_, Any
 
 from dataclasses import dataclass, field, replace
 
@@ -32,9 +32,9 @@ from .composed_types import *
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ThisType(TypeBase):
     """Represents the temporary value of `this` while still defining a type."""
-    name: ClassVar[str] = 'this'
+    name: str = field(init=False, default='this')
     size: ClassVar[None] = None
-    reference_type: ClassVar[Literal[True]] = True
+    reference_type: ClassVar[Literal_[True]] = True
     inherits: ClassVar[None] = None
     indexable: ClassVar[None] = None
     callable: ClassVar[None] = None

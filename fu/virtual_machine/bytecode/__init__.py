@@ -1,33 +1,27 @@
-from enum import Enum, auto
-from logging import getLogger
-from typing import TypeAlias, Callable, Any
 import struct
+from enum import Enum, auto
 from functools import partial
+from logging import getLogger
+from typing import Callable, TypeAlias
+
+from ...types.integral_types import *
 
 MODULE_LOGGER = getLogger(__name__)
 
 
-def decode_struct(pack: str, vals: bytes):
+def _decode_struct(pack: str, vals: bytes):
     return struct.unpack(pack, vals)[0]
 
 
-def encode_struct(pack: str, vals):
+def _encode_struct(pack: str, vals):
     return struct.pack(pack, vals)
 
 
-_u16: Callable[[bytes], int] = partial(decode_struct, '>H')
-_u32: Callable[[bytes], int] = partial(decode_struct, '>I')
-_u64: Callable[[bytes], int] = partial(decode_struct, '>L')
+_u16: Callable[[bytes], int] = partial(_decode_struct, '>H')
+_u32: Callable[[bytes], int] = partial(_decode_struct, '>I')
+_u64: Callable[[bytes], int] = partial(_decode_struct, '>L')
 
-u16: Callable[[int], bytes] = partial(encode_struct, '>H')
-
-
-class RegisterEnum(Enum):
-    Accumulator = auto()
-    A = auto()
-
-
-from ..compiler.typing.integral_types import *
+u16: Callable[[int], bytes] = partial(_encode_struct, '>H')
 
 
 class NumericTypes(Enum):
@@ -72,7 +66,7 @@ class ParamType(Enum):
         if t is Ellipsis:
             t = self.__class__
         self._length_ = length
-        self._type_ = t
+        self._type = t
 
     def __len__(self) -> int:
         return self._length_
@@ -82,8 +76,8 @@ class ParamType(Enum):
         return self._length_
 
     @property
-    def type(self):
-        return self._type_
+    def type_(self):
+        return self._type
 
     # PushOrPop = auto(), 1, bool
 
@@ -155,3 +149,6 @@ class OpcodeEnum(Enum):
     # # Arithmetic
     # ADD = auto(), (ParamType.ParamType, ParamType.ParamType)
     # MOV = auto(), (ParamType.ParamType, ParamType.ParamType)
+
+
+BytecodeTypes: TypeAlias = OpcodeEnum | NumericTypes | int | bytes | tuple['BytecodeTypes', ...]

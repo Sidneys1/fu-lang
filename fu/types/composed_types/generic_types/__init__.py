@@ -2,11 +2,11 @@ from dataclasses import dataclass, field
 from typing import Self, Union
 from logging import getLogger
 
+from ....compiler.tokenizer import SpecialOperatorType
+
 from ... import TypeBase
-from ...integral_types import TypeBase, dataclass, field
 
 from .. import ComposedType
-from ....tokenizer import SpecialOperatorType
 
 _LOG = getLogger(__package__)
 
@@ -55,46 +55,13 @@ def _rebuild_generic_type(t: 'GenericType',
         return _t
 
     # 2. Inherits
-    # inherits_list: list[ComposedType] = []
-    # for i in t.inherits or ():
-    #     if not isinstance(i, GenericType) or not any(t.generic_params[u] in i.generic_params.values()
-    #                                                  for u in updated_generics):
-    #         inherits_list.append(i)
-    #         continue
-    #     new_generics = {k: v for k, v in updated_generics.items() if t.generic_params[k] in i.generic_params.values()}
-    #     assert all(not isinstance(g, GenericType.GenericParam) for g in new_generics.values())
-    #     inherits_list.append(i.resolve_generic_instance(new_generics))
-    # inherits = tuple(inherits_list)
     if t.inherits is not None:
         inherits = tuple(_quick_generic(i) for i in t.inherits)
-    # del inherits_list
 
     # 3. Indexable
     if t.indexable is not None:
         indexable = tuple(_quick_generic(p) for p in t.indexable[0]), _quick_generic(t.indexable[1])
-        # params: tuple[TypeBase, ...]
-        # return_type: TypeBase
-        # params, return_type = t.indexable
-        # if return_type in reverse_map:
-        #     assert isinstance(return_type, GenericType.GenericParam)
-        #     return_type = reverse_map[return_type]
-        # elif isinstance(return_type, GenericType) and any(return_type.is_generic_of(gt) for gt in reverse_map):
-        #     return_type = return_type.resolve_generic_instance(updated_generics)
 
-        # new_params: list[TypeBase] = []
-        # for param in params:
-        #     if param in reverse_map:
-        #         assert isinstance(param, GenericType.GenericParam)
-        #         param = reverse_map[param]
-        #     elif isinstance(param, GenericType) and any(param.is_generic_of(gt) for gt in reverse_map):
-        #         param = param.resolve_generic_instance(updated_generics)
-        #     new_params.append(param)
-
-        # indexable = (tuple(new_params), return_type)
-
-        # del params
-        # del new_params
-        # del return_type
     # 4. Callable
     if t.callable is not None:
         callable = tuple(_quick_generic(p) for p in t.callable[0]), _quick_generic(t.callable[1])
@@ -168,12 +135,6 @@ class GenericType(ComposedType):
         object.__setattr__(self, '_name', self.name)
         object.__setattr__(self, 'name', f"{self.name}<{names}>")
 
-    # @classmethod
-    # def resolve_generic(cls, params: dict[str, TypeBase], *args, **kwargs) -> Self | ComposedType:
-    #     assert params
-    #     assert all(isinstance(x, TypeBase) for x in params.values())
-    #     return cls(*args, generic_params=params, **kwargs)
-
     def resolve_generic_instance(self,
                                  params: dict[str, TypeBase] | None = None,
                                  preserve_inheritance: bool = False,
@@ -188,3 +149,5 @@ class GenericType(ComposedType):
 
     def is_generic_of(self, t: GenericParam) -> bool:
         return _is_generic_of(self, t)
+
+__all__ = ('GenericType', )

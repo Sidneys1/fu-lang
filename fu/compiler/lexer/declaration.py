@@ -1,13 +1,17 @@
 from typing import Union, Self, TYPE_CHECKING, Union, Literal as Literal_
+from dataclasses import dataclass
 
-from . import Expression, Identifier, Identity, Lex, LexError, lex_dataclass, Namespace, Type_, SpecialOperatorIdentity, _indent, _tab, GenericParamList, ExpList
-from ..tokenizer import SourceLocation, TokenStream, TokenType
+from .. import TokenStream
+from ..tokenizer import SourceLocation, TokenType
+
+from . import (Identifier, Identity, Lex, LexError, Namespace, Type_, SpecialOperatorIdentity, _indent, _tab, ExpList,
+               GenericParamList)
 
 if TYPE_CHECKING:
-    from . import Scope
+    from . import Scope, Expression
 
 
-@lex_dataclass
+@dataclass(repr=False, slots=True, frozen=True)
 class TypeDeclaration(Lex):
     name: Identifier
     type: Literal_['interface'] | Literal_['type']
@@ -41,7 +45,7 @@ class TypeDeclaration(Lex):
         return f"TypeDeclaration<{self.name!r}{after}>"
 
 
-@lex_dataclass
+@dataclass(repr=False, slots=True, frozen=True)
 class Declaration(Lex):
     """Declaration: Identity [ '=' Expression | Scope ];"""
     identity: Identity | SpecialOperatorIdentity

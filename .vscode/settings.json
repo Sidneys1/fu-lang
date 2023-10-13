@@ -31,5 +31,6 @@
         "statusBar.border": "#20522a",
         "titleBar.border": "#20522a"
     },
-    "peacock.color": "#20522a"
+    "peacock.color": "#20522a",
+    "pylint.importStrategy": "fromEnvironment"
 }

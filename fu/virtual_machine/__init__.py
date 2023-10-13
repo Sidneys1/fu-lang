@@ -1,9 +1,9 @@
 from typing import TypeVar, Any
 from dataclasses import dataclass, field
 
-from . import OpcodeEnum, getLogger, ParamType, NumericTypes
+from ..types.integral_types import IntType, FloatType
 
-from ..compiler.typing.integral_types import IntType, FloatType
+from .bytecode import OpcodeEnum, getLogger, ParamType, NumericTypes
 
 _LOG = getLogger(__name__)
 
@@ -29,9 +29,9 @@ class VM:
     code: bytes
     ip = 0
 
-    _stack_frames = []
+    _stack_frames: list[StackFrame] = []
 
-    heap = []
+    heap: list[tuple[Any, ...]] = []
 
     def __init__(self, code: bytes, args: list[str]):
         self.code = code
@@ -66,7 +66,7 @@ class VM:
                 # print(f'Decoding param near EBP: {ebp_off}')
                 return self._stack[self.ebp - ebp_off]
             case _:
-                return type.type(self.slice(offset, offset + len(type)))
+                return type.type_(self.slice(offset, offset + len(type)))
 
     def decode_op(self) -> tuple[int, OpcodeEnum, list[Any]]:
         op = OpcodeEnum(self.code[self.ip])
@@ -76,9 +76,9 @@ class VM:
         for t in op.params:
             # print(f'param type is {t}')
             if len(t) == 1:
-                val = t.type(self.code[self.ip + length])
+                val = t.type_(self.code[self.ip + length])
             else:
-                val = t.type(self.code[self.ip + length:self.ip + length + len(t)])
+                val = t.type_(self.code[self.ip + length:self.ip + length + len(t)])
             length += len(t)
             params.append(val)
         return length, op, params

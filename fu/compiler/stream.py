@@ -2,13 +2,14 @@ from io import TextIOBase
 from contextlib import contextmanager
 from typing import TypeVar, Generic, Any, Iterator
 import inspect
-import traceback
 
-from . import StrStream as _StrStream, Stream as _Stream
+from . import StrStream as _StrStream, Stream as _Stream, TokenStream as _TokenStream
 from .tokenizer import TokenType, Token
 
 
 class StrStream(_StrStream):
+    """A stream of chars coming out of a TextIOBase."""
+
     WHITESPACE = ' \t\n\r'
 
     __stream: TextIOBase
@@ -104,7 +105,94 @@ class StrStream(_StrStream):
 T = TypeVar('T', covariant=True)
 
 
+class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
+    """A stream based on a list."""
+    _list: list[T]
+    index: int
+    committed = False
+    _depth: int = 0
+    peeked: int = 0
+    popped: int = 0
+    _generator: Iterator[T] | None
+
+    def __init__(self, items: list[T], index=0, depth=0, generator=None) -> None:
+        self._list = items
+        self.index = index
+        self._depth = depth
+        self._generator = generator
+        self._try_get_more()
+
+    @property
+    def eof(self) -> bool:
+        return self.index == len(self._list)
+
+    @property
+    def depth(self) -> int:
+        return self._depth
+
+    @contextmanager
+    def clone(self):
+        clone = self.__class__(self._list, self.index, self._depth + 1, self._generator)
+        try:
+            yield clone
+        finally:
+            if clone.committed:
+                self.index = clone.index
+                self.peeked += clone.peeked
+                self.popped += clone.popped
+            else:
+                self.peeked += clone.popped + clone.peeked
+                # if clone._popped > 0:
+                #     print('clone failed big-time:', clone.efficiency)
+
+    def _try_get_more(self):
+        if self._generator is None:
+            return
+        if self.index != len(self._list):
+            return
+        try:
+            self._list.append(next(self._generator))
+        except StopIteration:
+            self._generator = None
+
+    # _who_called = {}
+
+    def peek(self) -> T | None:
+        if self.eof:
+            return None
+        stack = inspect.stack()[1].frame
+
+        # if (caller_class := stack.f_locals.get('self', stack.f_locals.get('cls', None))) is not None:
+        #     if caller_class not in ListStream._who_called:
+        #         ListStream._who_called[caller_class] = 0
+        #     ListStream._who_called[caller_class] += 1
+
+        self.peeked += 1
+        ret = self._list[self.index]
+        self._try_get_more()
+        return ret
+
+    def pop(self) -> T | None:
+        if self.eof:
+            return None
+        # self._peeked += 1
+        self.popped += 1
+        self.index += 1
+        ret = self._list[self.index - 1]
+        self._try_get_more()
+        # print(f"Popped {ret}")
+        return ret
+
+    def commit(self) -> None:
+        self.committed = True
+
+    @property
+    def efficiency(self) -> tuple[int, int]:
+        return self.peeked, self.popped
+
+
 class StreamExpectError(Exception):
+    """Raised when a stream was expected to pop a specific element."""
     expected: Any
     got: Any
 
@@ -114,100 +202,16 @@ class StreamExpectError(Exception):
 
 
 class QuietStreamExpectError(Exception):
-    ...
+    """Raised when a stream was (quietly) expected to pop a specific element."""
 
 
-class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
-    _list: list[T]
-    _index: int
-    _committed = False
-    _depth: int = 0
-    _peeked: int = 0
-    _popped: int = 0
-    _generator: Iterator[T] | None
-
-    def __init__(self, items: list[T], index=0, depth=0, generator=None) -> None:
-        self._list = items
-        self._index = index
-        self._depth = depth
-        self._generator = generator
-        self._try_get_more()
-
-    @property
-    def eof(self) -> bool:
-        return self._index == len(self._list)
-
-    @property
-    def depth(self) -> int:
-        return self._depth
-
-    @contextmanager
-    def clone(self):
-        clone = self.__class__(self._list, self._index, self._depth + 1, self._generator)
-        try:
-            yield clone
-        finally:
-            if clone._committed:
-                self._index = clone._index
-                self._peeked += clone._peeked
-                self._popped += clone._popped
-            else:
-                self._peeked += clone._popped + clone._peeked
-                # if clone._popped > 0:
-                #     print('clone failed big-time:', clone.efficiency)
-
-    def _try_get_more(self):
-        if self._generator is None:
-            return
-        if self._index != len(self._list):
-            return
-        try:
-            self._list.append(next(self._generator))
-        except StopIteration:
-            self._generator = None
-
-    _who_called = {}
-
-    def peek(self) -> T | None:
-        if self.eof:
-            return None
-        stack = inspect.stack()[1].frame
-
-        if (caller_class := stack.f_locals.get('self', stack.f_locals.get('cls', None))) is not None:
-            if caller_class not in ListStream._who_called:
-                ListStream._who_called[caller_class] = 0
-            ListStream._who_called[caller_class] += 1
-
-        self._peeked += 1
-        ret = self._list[self._index]
-        self._try_get_more()
-        return ret
-
-    def pop(self) -> T | None:
-        if self.eof:
-            return None
-        # self._peeked += 1
-        self._popped += 1
-        self._index += 1
-        ret = self._list[self._index - 1]
-        self._try_get_more()
-        # print(f"Popped {ret}")
-        return ret
-
-    def commit(self) -> None:
-        self._committed = True
-
-    @property
-    def efficiency(self) -> tuple[int, int]:
-        return self._peeked, self._popped
-
-
-class TokenStream(ListStream[Token]):
+class TokenStream(ListStream[Token], _TokenStream):
+    """A stream of lexical tokens (impl)."""
 
     def expect(self, type_: TokenType, quiet=False) -> Token:
-        if self.eof:
-            raise EOFError()
         peek = self.pop()
+        if peek is None:
+            raise EOFError()
         if peek.type != type_:
             if quiet:
                 raise QuietStreamExpectError(type_, peek)

@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from typing import Self, ClassVar
 
-from ....tokenizer import SpecialOperatorType
+from ....compiler.tokenizer import SpecialOperatorType
+
 from ... import ThisType, TypeBase
+
 from . import GenericType, ComposedType
 
 
@@ -48,8 +50,8 @@ class TypeType(GenericType):
 
 
 def _typetype_size(self: TypeType) -> int | None:
+    # TODO
     return None
-    # raise NotImplementedError()
 
 
 def _typetype_callable(self: TypeType) -> tuple[tuple[TypeBase, ...], TypeBase] | None:
@@ -59,15 +61,16 @@ def _typetype_callable(self: TypeType) -> tuple[tuple[TypeBase, ...], TypeBase] 
         assert isinstance(ret, ThisType)
         return params, ret.resolved
     return None
-    raise NotImplementedError()
 
 
 def _typetype_indexable(self: TypeType) -> tuple[Self, ...] | None:
-    return None
     # Determined by whether we have a static `op[]` member.
-    raise NotImplementedError()
+    # TODO
+    return None
 
 
 TypeType.size = property(_typetype_size)
 TypeType.callable = property(_typetype_callable)
 TypeType.indexable = property(_typetype_indexable)
+
+__all__ = ('TypeType', 'TYPE_TYPE')
