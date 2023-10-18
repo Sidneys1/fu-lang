@@ -1,49 +1,57 @@
 import sys
-from argparse import ArgumentParser, FileType
+from os import sep as pathsep
+from argparse import ArgumentParser, ArgumentError
 from logging import getLogger, basicConfig, DEBUG, INFO, ERROR
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import Protocol
 
-from . import NAME, SourceLocation, CompilerNotice, SourceFile
-from .analyzer.scope import _PARSING_BUILTINS
-from .stream import StrStream, TokenStream
-from .tokenizer import Token
-from .lexer import parse, Document
+from fu.compiler.discovery import DEFAULT_STD_ROOT
+
+from . import NAME
+from .discovery import load_std, discover_files
+from .lexer import Document
 
 _LOG = getLogger(__package__)
-
-
-def load_file(path: Path) -> Document:
-    with open(path, 'r', encoding='utf-8') as file:
-        doc = parse(TokenStream([], generator=Token.token_generator(StrStream(file))))
-        if doc is None:
-            input(f'wtf error loading {path}')
-        return doc
-
-
-def load_std() -> Iterator[Document]:
-    root = Path(__file__).parent.parent.parent / 'lib'
-    path = root / '__builtins__.fu'
-    SourceFile.set(str(path.relative_to(Path.cwd())))
-    yield load_file(path)
-    for path in root.glob('**/*.fu'):
-        if path.name.startswith('.') or path.name == '__builtins__.fu':
-            continue
-        SourceFile.set(str(path.relative_to(Path.cwd())))
-        yield load_file(path)
 
 
 class ParsedArgs(Protocol):
     run: bool
     verbose: bool
-    FILE: FileType
+    # FILE: FileType
+    root: Path
+    std_root: Path
+
+    @staticmethod
+    def root_path(string: str) -> Path:
+        ret = Path(string).absolute()
+        if not ret.is_dir():
+            raise ArgumentError(None, f"`{ret}` is not a directory.")
+        cwd = Path.cwd()
+        if cwd != ret and cwd not in ret.parents:
+            raise ArgumentError(None, f"`{ret}` is not a subdirectory of `{cwd}`.")
+        return ret.absolute().relative_to(cwd)
+
+    @staticmethod
+    def std_root_path(string: str) -> Path:
+        ret = Path(string)
+        if not ret.is_dir():
+            raise ArgumentError(None, f"`{ret}` is not a directory.")
+        if not (ret / '__builtins__.fu').is_file():
+            raise ArgumentError(None, f"`{ret}` does not contain `__builtins__.fu`.")
+        return ret.absolute()
 
 
 def main(*args) -> int:
     parser = ArgumentParser(NAME)
     parser.add_argument('-r', '--run', help="Compile and run.", action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
-    parser.add_argument('FILE', type=FileType())
+    parser.add_argument('--std-root', type=ParsedArgs.std_root_path, default=DEFAULT_STD_ROOT)
+    parser.add_argument('root',
+                        metavar='DIR',
+                        nargs='?',
+                        type=ParsedArgs.root_path,
+                        help='Compile source files found under this directory (default: %(default)s).',
+                        default='.' + pathsep)
     ns: ParsedArgs
     ns, unknown_args = parser.parse_known_args(args)
 
@@ -53,25 +61,26 @@ def main(*args) -> int:
         getLogger(__package__ + ".lexer").setLevel(level=ERROR)
         basicConfig(level=INFO)
 
-    docs: list[Document] = list(load_std())
+    docs: list[Document] = list(load_std(ns.std_root))
+    docs.extend(discover_files(ns.root))
+    # SourceFile.set(str(ns.root))
 
-    SourceFile.set(str(Path(ns.FILE.name).absolute().relative_to(Path.cwd())))
-    str_stream = StrStream(ns.FILE)
+    # str_stream = StrStream(ns.FILE)
 
-    token_stream = TokenStream([], generator=Token.token_generator(str_stream))
+    # token_stream = TokenStream([], generator=Token.token_generator(str_stream))
 
-    lex = parse(token_stream)
+    # lex = parse(token_stream)
 
     # peeks, pops = str_stream.efficiency
     # print(f"Chars: {peeks=}, {pops=}, {pops/(pops+peeks or 1):0.2%}")
     # peeks, pops = token_stream.efficiency
     # print(f"Tokens: {peeks=}, {pops=}, {pops/(pops+peeks or 1):0.2%}")
-    if not token_stream.eof:
-        print(f"Failed at: {token_stream.peek()}")
-        return 1
-    if lex is None:
-        print(f'Failed to lex.')
-        return 1
+    # if not token_stream.eof:
+    #     print(f"Failed at: {token_stream.peek()}")
+    #     return 1
+    # if lex is None:
+    #     print(f'Failed to lex.')
+    #     return 1
 
     # for klass, calls in sorted(token_stream._who_called.items(), key=lambda t: t[1], reverse=True):
     #     print(klass.__name__, calls)
@@ -85,16 +94,16 @@ def main(*args) -> int:
     from .console import render_error
 
     from .analyzer import check_program
-    docs.append(lex)
+    # docs.append(lex)
     errors = list(check_program(docs))
 
     if all(error.level.lower() not in ('error', 'critical') for error in errors):
         from .compile import compile
-        bytecode = b''
+        binary = None
 
         def _():
-            nonlocal bytecode
-            bytecode = yield from compile()
+            nonlocal binary
+            binary = yield from compile()
 
         errors.extend(_())
 
@@ -124,8 +133,11 @@ def main(*args) -> int:
         return error_count
 
     if ns.run:
+        if binary is None:
+            return -1
+
         from ..virtual_machine import VM
-        vm = VM(bytecode, unknown_args)
+        vm = VM(binary, unknown_args)
         try:
             vm.run()
         except VM.VmTerminated as ex:

@@ -131,11 +131,14 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                         _check_conversion(rhs_type, var_type, element.initial.location)
                     except CompilerNotice as ex:
                         yield ex
-                        return
             # Add to current scope
 
             _LOG.debug(f"Adding {name} to {scope.fqdn} as {var_type.name}")
-            scope.members[name] = StaticVariableDecl(var_type, element)
+            svd = StaticVariableDecl(var_type, element)
+            scope.members[name] = svd
+            if scope.this_decl is not None:
+                scope.this_decl.member_decls[name] = svd
+                scope.this_decl.type.members[name] = var_type
         case Document():
             for decl in element.content:
                 # try:

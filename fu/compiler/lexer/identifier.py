@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Iterable
 
 from . import Lex, TokenStream, TokenType
 
@@ -8,8 +9,11 @@ class Identifier(Lex):
     """Identifier: Word"""
     value: str
 
-    def __str__(self) -> str:
-        return self.value
+    # def __str__(self) -> str:
+    #     return self.value
+
+    def to_code(self) -> Iterable[str]:
+        yield self.value
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
         return f'"{self.value}"', []
@@ -18,4 +22,4 @@ class Identifier(Lex):
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         if (tok := stream.pop()) is None or tok.type != TokenType.Word:
             return None
-        return cls(tok.value, location=tok.location)
+        return Identifier([tok], tok.value, location=tok.location)

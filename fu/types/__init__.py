@@ -50,8 +50,9 @@ from .composed_types.generic_types import *
 from .composed_types.generic_types.type_ import *
 from .composed_types.generic_types.array import ARRAY_TYPE
 
-U8_ARRAY_TYPE = ARRAY_TYPE.resolve_generic_instance({'T': U8_TYPE})
+U8_ARRAY_TYPE = ARRAY_TYPE.resolve_generic_instance(T=U8_TYPE)
 STR_TYPE = U8_ARRAY_TYPE
+STR_ARRAY_TYPE = ARRAY_TYPE.resolve_generic_instance(T=STR_TYPE)
 
 BUILTINS: dict[str, TypeBase] = {
     'type': TYPE_TYPE,

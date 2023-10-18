@@ -1,30 +1,27 @@
 from abc import ABC, abstractmethod
-from typing import Iterator, Generic, TypeVar, Sequence, ClassVar
+from typing import Iterator, Generic, TypeVar, Sequence, Union, Self, NewType
 from dataclasses import field, dataclass
+from io import BytesIO
+from enum import Enum
 
-from .. import BytecodeTypes
-
-from ...compiler import SourceLocation
+from .. import _encode_u32, BytecodeTypes, _encode_f32, _encode_u8
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class BytecodeBase(ABC):
     """Base class for all bytecode structures."""
-    location: SourceLocation = field(kw_only=False)
 
-    def encode(self) -> Iterator[BytecodeTypes]:
-        for x in self._encode():
-            if isinstance(x, BytecodeBase):
-                yield from x.encode()
-            else:
-                yield x
+    @classmethod
+    def decode(cls, stream: BytesIO) -> tuple[Self, bytes]:
+        raise NotImplementedError()
+
+    def encode(self) -> Iterator[bytes]:
+        yield from _to_bytes(self._encode())
 
     @abstractmethod
-    def _encode(self) -> Iterator[BytecodeTypes | 'BytecodeBase']:
+    def _encode(self) -> Iterator[Union[BytecodeTypes, 'BytecodeBase']]:
         ...
 
-
-from typing import Generic, TypeVar
 
 T = TypeVar('T', bound=BytecodeBase)
 
@@ -32,24 +29,39 @@ T = TypeVar('T', bound=BytecodeBase)
 @dataclass(frozen=True, kw_only=True, slots=True)
 class BytecodeContainer(Generic[T], BytecodeBase, ABC):
     """A simple bytecode type that just contains other types."""
-    MAGIC: ClassVar[bytes]
     content: Sequence[T] = field(default_factory=list)
 
     def _encode(self) -> Iterator[T | BytecodeTypes]:
-        yield self.MAGIC
-        yield len(self.content)
+        print(f"encoding {type(self).__name__}: {len(self.content)}")
+        yield _encode_u32(len(self.content))
         yield from self.content
 
 
 from .code import *
 from .types import *
+from .binary import *
 
 
-@dataclass(frozen=True, kw_only=True, slots=True)
-class BytecodeBinary(BytecodeBase):
-    """A complete binary."""
-    MAGIC: ClassVar[bytes] = b'foo-binary-v0.0.1'
-    types: list[BytecodeType] = field(default_factory=list)
-
-    def _encode(self) -> Iterator[BytecodeTypes | BytecodeBase]:
-        yield BytecodeBinary.MAGIC
+def _to_bytes(in_: Iterator[BytecodeTypes | BytecodeBase], silent=False) -> Iterator[bytes]:
+    for x in in_:
+        if not silent:
+            print(f"Bytecode Structure to-bytes: {x}")
+        match x:
+            case BytecodeBase():
+                yield from x.encode()
+            case tuple():
+                yield from _to_bytes((y for y in x), silent=True)
+            case Enum():
+                val = x.value
+                assert isinstance(val, int) and \
+                    max(type(x)._value2member_map_.keys()) < 255 and \
+                    min(type(x)._value2member_map_.keys()) >= 0  # noqa
+                yield _encode_u8(val)
+            case int():
+                yield _encode_u8(x)
+            case float():
+                yield _encode_f32(x)
+            case bool():
+                yield b'\x01' if x else b'\x00'
+            case _:
+                yield x

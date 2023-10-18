@@ -70,6 +70,9 @@ def resolve_type(element: Lex,
             return ret
         case Operator(oper=Token(type=TokenType.LBracket)):
             lhs_type = resolve_type(element.lhs)
+            if isinstance(lhs_type, StaticVariableDecl):
+                lhs_decl = lhs_type
+                lhs_type = lhs_type.type
             if not lhs_type.indexable:
                 raise CompilerNotice('Error', f"{lhs_type.name} is not array indexable.", location=element.lhs.location)
             return lhs_type.indexable[1]

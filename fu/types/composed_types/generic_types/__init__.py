@@ -93,7 +93,7 @@ def _rebuild_generic_type(t: 'GenericType',
             del kwargs['inherits']
             del kwargs['indexable']
             del kwargs['callable']
-        ret = type(t)(t._name, **kwargs)
+        ret = type(t)(**kwargs)
         mode = f'still-generic-on `{'`, `'.join(not_updated_generics)}`' if still_generic else 'fully-resolved'
         if preserve_inheritance:
             mode += f' (but preserving inheritance from {type(t).__name__})'
@@ -101,6 +101,7 @@ def _rebuild_generic_type(t: 'GenericType',
             f"Resolution of `{'`, `'.join(new)}` for {t.name} produced {mode} `{ret.name}`."
         )
         return ret
+    
     from .array import ARRAY_TYPE
     if t == ARRAY_TYPE:
         name = all_params['T'].name + '[]'

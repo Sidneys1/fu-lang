@@ -40,7 +40,3 @@ class GenericParamList(Lex):
             stream.pop()
         end = stream.expect(TokenType.GreaterThan).location
         return cls(params, location=SourceLocation.from_to(start, end))
-
-    def check(self):
-        for param in self.params:
-            yield from param.check()

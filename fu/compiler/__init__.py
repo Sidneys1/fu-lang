@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from contextvars import ContextVar
 from logging import getLogger
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from .tokenizer import Token, TokenType
 
 NAME = __name__
@@ -60,7 +60,7 @@ class ImmutableStream(Generic[T, Tk], Protocol):
     def depth(self) -> int:
         """The depth of recursive stream objects."""
 
-    def peek(self) -> T | None:
+    def peek(self) -> T:
         """Peek at the next item in the stream."""
 
     def clone(self) -> ContextManager[Tk]:
@@ -74,7 +74,7 @@ class ImmutableStream(Generic[T, Tk], Protocol):
 class Stream(ImmutableStream[T, Tk], Protocol):
     """A stream that allows popping/commiting."""
 
-    def pop(self) -> T | None:
+    def pop(self) -> T:
         """Pop the next object. Advances the stream head."""
 
     def commit(self) -> None:

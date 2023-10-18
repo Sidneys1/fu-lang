@@ -29,6 +29,3 @@ class Expression(Lex):
         for t in cls.allowed:
             if (ret := t.try_lex(stream)) is not None:
                 return ret
-
-    def check(self):
-        yield from self.value.check()

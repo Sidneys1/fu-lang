@@ -2,3 +2,4 @@ pydocstyle
 mypy
 yapf
 pylint
+pytest

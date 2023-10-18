@@ -20,5 +20,3 @@ usize_t: type;
 bool: type;
 
 str: type = u8[];
-
-print: void(s: str);

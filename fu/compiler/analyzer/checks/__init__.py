@@ -41,6 +41,7 @@ def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice
                 continue
             case Declaration(identity=Identity()) if elem.initial is None:
                 assert isinstance(elem.identity, Identity)
+                # input(this_decl)
                 unassigned.append(this_decl.member_decls[elem.identity.lhs.value])
         yield from _check(elem)
 
@@ -48,7 +49,7 @@ def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice
         if unassigned:
             inner = '`, `'.join(x.lex.identity.lhs.value for x in unassigned)
             yield CompilerNotice(
-                'Error', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
+                'Warning', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
                 element.location)
         return
 
@@ -91,7 +92,7 @@ def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice
     if unassigned:
         inner = '`, `'.join(x.lex.identity.lhs.value for x in unassigned)
         yield CompilerNotice(
-            'Error', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
+            'Warning', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
             element.location)
 
 
@@ -183,8 +184,8 @@ def _check_conversion(from_: TypeBase | StaticVariableDecl, to_: TypeBase | Stat
         raise CompilerNotice('Error', "There are no implicit conversions of Enums.", location=location)
 
     match from_, to_:
-        case (TypeBase(size=None), _) | (_, TypeBase(size=None)):
-            raise NotImplementedError(f"Can't compare types with unknown sizes ({from_.name} and/or {to_.name})...")
+    # case (TypeBase(size=None), _) | (_, TypeBase(size=None)):
+    #     raise NotImplementedError(f"Can't compare types with unknown sizes ({from_.name} and/or {to_.name})...")
         case IntType(), IntType() if from_.size is not None and to_.size is not None:
             from_min, from_max = from_.range()
             to_min, to_max = to_.range()
@@ -233,12 +234,11 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             yield from _check_declaration(element)
         case TypeDeclaration(type='type'):
             try:
-                vars = {'this': scope.members[element.name.value]}
-                if element.generic_params is not None:
-                    for x in element.generic_params.params or ():
-                        vars[x.value] = StaticVariableDecl(GenericType.GenericParam(x.value), x)
-
-                with AnalyzerScope.new(element.name.value, vars):
+                # vars = {'this': scope.members[element.name.value]}
+                # if element.generic_params is not None:
+                #     for x in element.generic_params.params or ():
+                #         vars[x.value] = StaticVariableDecl(GenericType.GenericParam(x.value), x)
+                with AnalyzerScope.enter(element.name.value):
                     yield from _check_type_declaration(element)
             except CompilerNotice as ex:
                 yield ex
@@ -274,6 +274,9 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
         case Operator(oper=Token(type=TokenType.LBracket)):
             yield from _check(element.lhs)
             lhs_type = resolve_type(element.lhs)
+            if isinstance(lhs_type, StaticVariableDecl):
+                lhs_decl = lhs_type
+                lhs_type = lhs_type.type
             if not lhs_type.indexable:
                 yield CompilerNotice('Error', f"`{lhs_type.name}` is not array indexable.", location=element.location)
                 return

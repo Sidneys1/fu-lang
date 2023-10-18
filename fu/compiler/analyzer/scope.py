@@ -21,6 +21,7 @@ class AnalyzerScope:
     parent: Self | None = field(default=None, repr=False)
     location: SourceLocation | None = field(default=None)
     return_type: StaticVariableDecl | None = field(default=None)
+    this_decl: StaticVariableDecl | None = field(default=None)
 
     @property
     def parsing_builtins(self) -> bool:
@@ -35,13 +36,20 @@ class AnalyzerScope:
     def new(cls,
             name: str | None = None,
             vars: dict[str, Union[StaticVariableDecl, 'AnalyzerScope']] | None = None,
+            this_decl: StaticVariableDecl | None = None,
             return_type: StaticVariableDecl | None = None):
         cur = _CURRENT_ANALYZER_SCOPE.get()
         if name in cur.scopes:
             raise ValueError(f"Already have {cur.fqdn}.{name}! Use `.enter(...)`.")
         if vars is None:
             vars = {}
-        val = AnalyzerScope(name=name, parent=cur, members=vars, return_type=return_type)
+        if this_decl is not None:
+            if 'this' in vars:
+                assert vars['this'] == this_decl
+            else:
+                vars['this'] = this_decl
+
+        val = AnalyzerScope(name=name, parent=cur, members=vars, return_type=return_type, this_decl=this_decl)
         if name is not None:
             cur.scopes[name] = val
         token = _CURRENT_ANALYZER_SCOPE.set(val)

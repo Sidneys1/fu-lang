@@ -1,3 +1,0 @@
-main: i32(args: str[]) = {
-    return args.length;
-};

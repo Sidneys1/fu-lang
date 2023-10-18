@@ -30,7 +30,3 @@ class ReturnStatement(Lex):
             pass
         end = stream.expect(TokenType.Semicolon).location
         return cls(value, location=SourceLocation.from_to(start, end))
-
-    def check(self):
-        _LOG.debug("checking returnstatement")
-        yield from self.value.check()

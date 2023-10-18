@@ -1,0 +1,4 @@
+Array: type<T> = {
+    length: usize_t;
+    op[]: T(this);
+};

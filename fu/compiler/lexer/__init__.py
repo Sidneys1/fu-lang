@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Any, Iterable, Optional, Union, Self, TypeAlias
 from logging import getLogger
 from contextvars import ContextVar
@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from .. import CompilerNotice, ImmutableTokenStream, TokenStream
-from ..tokenizer import TokenType, Token, SourceLocation, SpecialOperatorType
+from ..tokenizer import TokenType, Token, SourceLocation, SpecialOperatorType, NON_CODE_TOKEN_TYPES
 from ..stream import StreamExpectError, QuietStreamExpectError
 
 _LOG = getLogger(__name__)
@@ -52,10 +52,12 @@ def parse(istream: ImmutableTokenStream) -> Optional['Document']:
 class Lex(ABC):
     """Base class for a lexical element."""
 
+    raw: list[Union[Token, 'Lex']]
     location: SourceLocation = field(kw_only=True)
 
+    @abstractmethod
     def to_code(self) -> Iterable[str]:
-        yield self.__str__()
+        ...
 
     @classmethod
     def try_lex(cls, istream: ImmutableTokenStream) -> Optional[Self]:
@@ -69,8 +71,8 @@ class Lex(ABC):
                 return ret
             except LexWarning as ex:
                 _LOG.warn("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
-            except EOFError as ex:
-                _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
+            # except EOFError as ex:
+            #     _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
             except QuietStreamExpectError:
                 pass
         return None
@@ -172,10 +174,6 @@ class ExpList(Lex):
 
         return cls(params, location=SourceLocation.from_to(params[0].location, params[-1].location))
 
-    def check(self):
-        for param in self.values:
-            yield from param.check()
-
 
 @dataclass(repr=False, slots=True, frozen=True)
 class ArrayDef(Lex):
@@ -202,10 +200,6 @@ class ArrayDef(Lex):
         end = stream.expect(TokenType.RBracket).location
         return cls(size, location=SourceLocation.from_to(start, end))
 
-    def check(self):
-        if self.size and '.' in self.size.value:
-            yield CompilerNotice('Error', "Array sizes cannot be decimals.", self.location)
-
 
 @dataclass(repr=False, slots=True, frozen=True)
 class Type_(Lex):
@@ -230,7 +224,7 @@ class Type_(Lex):
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         if (ident := Identifier.try_lex(stream)) is None:
-            return
+            return None
         start = ident.location
         end = ident.location
         mods = []
@@ -249,16 +243,7 @@ class Type_(Lex):
                 break
             end = mod.location
             mods.append(mod)
-        return cls(ident, mods, location=SourceLocation.from_to(start, end))
-
-    def check(self):
-        scope = _SCOPE.get()
-        # print('!!!checking', self.ident.value, 'in', scope.variables)
-        if not scope.in_scope(self.ident.value):
-            yield CompilerNotice("Error", f"{self.ident.value!r} has not yet been defined.", self.ident.location)
-        # yield from self.ident.check()
-        for mod in self.mods:
-            yield from mod.check()
+        return cls([ident, *mods], ident, mods, location=SourceLocation.from_to(start, end))
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -273,15 +258,20 @@ class Namespace(Lex):
     def to_code(self) -> Iterable[str]:
         # if self.metadata:
         #     yield self.metadata.to_code()
-        first_line = _tab() + '.'.join(x.value for x in self.name) + ': namespace = {'
-        if not self.static_scope.content:
-            yield first_line + ' };'
-        else:
-            yield first_line
-            with _indent():
-                for x in self.static_scope.to_code():
-                    yield x
-            yield _tab() + '};'
+
+        yield _tab() + '.'.join(x.value for x in self.name) + ': namespace = '
+        yield from self.static_scope.to_code()
+        yield ';'
+
+        # first_line = _tab() + '.'.join(x.value for x in self.name) + ': namespace = {'
+        # if not self.static_scope.content:
+        #     yield first_line + ' };'
+        # else:
+        #     yield first_line
+        #     with _indent():
+        #         for x in self.static_scope.to_code():
+        #             yield x
+        #     yield _tab() + '};'
 
     def __str__(self) -> str:
         name = '.'.join(x.value for x in self.name)
@@ -306,53 +296,67 @@ class SpecialOperatorIdentity(Lex):
     lhs: SpecialOperatorType
     rhs: Type_
 
-    def __str__(self) -> str:
-        return f"{self.lhs.value}: {self.rhs}"
+    def to_code(self) -> Iterable[str]:
+        yield f"{self.lhs.value}: {self.rhs}"
 
     def __repr__(self) -> str:
         return f"SpecialOperator<{self.lhs!r}, {self.rhs!r}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return self.lhs.value, [self.rhs]
 
 
 @dataclass(repr=False, slots=True, frozen=True)
 class Identity(Lex):
-    """Identity: Identifier ':' ('namespace' | Type_);"""
+    """Identity: Identifier ':' Type_"""
     lhs: Identifier
     rhs: Type_
 
-    def __str__(self) -> str:
-        return f"{self.lhs}: {self.rhs}"
+    # def __str__(self) -> str:
+    #     return f"{self.lhs}: {self.rhs}"
+
+    def to_code(self) -> Iterable[str]:
+        yield _tab() + self.lhs.value + ': ' + ''.join(self.rhs.to_code())
 
     def __repr__(self) -> str:
         return f"Identity<{self.lhs!r}, {self.rhs!r}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return f"identity", [self.lhs, self.rhs]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        raw: list[Lex | Token] = []
         tok = stream.pop()
         if tok is None or tok.type not in (TokenType.Word, TokenType.SpecialOperator):
-            return
+            return None
+        raw.append(tok)
 
-        start = tok.location
-        lhs = (Identifier(tok.value, location=tok.location) if tok.type == TokenType.Word else tok.special_op_type)
+        lhs = (Identifier(raw, tok.value, location=tok.location) if tok.type == TokenType.Word else tok)
+        assert lhs is not None and (isinstance(lhs, Token) or isinstance(lhs, Identifier))
+        raw.append(lhs)
 
         if (tok := stream.pop()) is None or tok.type != TokenType.Colon:
             raise LexWarning("Expected Colon")
+        raw.append(tok)
+
         if stream.peek().type == TokenType.NamespaceKeyword:
-            return
+            return None
+
         rhs = Type_.try_lex(stream)
         if rhs is None:
             raise LexError("Expected a `Type_`.")
-        end = rhs.location
+        raw.append(rhs)
+
+        location = SourceLocation.from_to(raw[0].location, raw[-1].location)
+
         if isinstance(lhs, Identifier):
-            return cls(lhs, rhs, location=SourceLocation.from_to(start, end))
-        return SpecialOperatorIdentity(lhs, rhs, location=SourceLocation.from_to(start, end))
+            return Identity(raw, lhs, rhs, location=location)
+
+        return SpecialOperatorIdentity(raw, lhs.special_op_type, rhs, location=location)
 
 
+# MetadataList
 """
 @dataclass(repr=False, slots=True, frozen=True)
 class MetadataList(Lex):
@@ -364,16 +368,6 @@ class MetadataList(Lex):
 
     def _s_expr(self) -> tuple[str, list[Self]]:
         return "metadata", self.metadata
-
-    def check(self) -> Iterator[CompilerNotice]:
-        scope = _SCOPE.get()
-        for i in self.metadata:
-            yield from i.check()
-            type = scope.in_scope(i.value)
-            if type is None:
-                raise CompilerNotice("Error", f"Could not resolve `{i.value}`.", i.location)
-            if not type.callable or type.evals_to != _VOID_TYPE:
-                raise CompilerNotice("Error", "Metadata functions must be callable and return `void`.", i.location)
 
     @classmethod
     def _try_lex(cls, stream: TokenStream):
@@ -423,13 +417,6 @@ class Statement(Lex):
         end = stream.expect(TokenType.Semicolon)
         return cls(res, location=SourceLocation.from_to(res.location, end.location))
 
-    def check(self) -> None:
-        _LOG.debug("Checking statement %r", self.value)
-        try:
-            yield from self.value.check()
-        except CompilerNotice as ex:
-            yield ex
-
 
 ALLOWED_IN_STATIC_SCOPE: TypeAlias = Declaration
 
@@ -441,7 +428,26 @@ class StaticScope(Lex):
     content: list[ALLOWED_IN_STATIC_SCOPE]
 
     def to_code(self):
-        yield from (c.to_code() for c in self.content)
+        if len(self.raw) == 2:
+            yield '{ }'
+            return
+
+        yield '{'
+        with _indent():
+            for x in self.raw[1:-1]:
+                if isinstance(x, Lex):
+                    yield from x
+                elif x.type == TokenType.BlankLine:
+                    yield x.value
+                else:
+                    yield _tab() + x.value
+        yield '}'
+        # if not self.content:
+        #     yield '{ }'
+        #     return
+        # yield '{'
+        # yield from (_tab() + c.to_code() for c in self.content)
+        # yield _tab() + '}'
 
     def __repr__(self) -> str:
         inner = ", ".join(repr(c) for c in self.content)
@@ -450,25 +456,27 @@ class StaticScope(Lex):
     def __iter__(self):
         return self.content.__iter__()
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return None, self.content
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        start = stream.position
-        try:
-            ret = [Declaration.try_lex(stream)]
-        except:
-            ret = [None]
-        if ret[0] is None:
-            if (tok := stream.peek()) is not None and tok.type != TokenType.RBrace:
-                raise LexError("Expected `Declaration` or '}';")
-            return cls([], location=start)
+        lbrace = stream.expect(TokenType.LBrace)
+        raw: list[Lex | Token] = [lbrace]
+
+        ret: list[ALLOWED_IN_STATIC_SCOPE] = []
         while (tok := stream.peek()) is not None and tok.type != TokenType.RBrace:
-            if (next := Declaration.try_lex(stream)) is None:
+            if tok.type in NON_CODE_TOKEN_TYPES:
+                raw.append(stream.pop())
+                continue
+            if (decl := Declaration.try_lex(stream)) is None:
                 raise LexError("Expected `Declaration`.")
-            ret.append(next)
-        return cls(ret, location=SourceLocation.from_to(ret[0].location, ret[-1].location))
+            ret.append(decl)
+            raw.append(decl)
+        rbrace = stream.expect(TokenType.RBrace)
+        raw.append(rbrace)
+
+        return StaticScope(raw, ret, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -511,36 +519,6 @@ class Scope(Lex):
         end = stream.expect(TokenType.RBrace)
         return cls(ret, location=SourceLocation.from_to(start.location, end.location))
 
-    """
-    def check(self):
-        if not self.content:
-            yield CompilerNotice("Info", "Empty scope?", self.location)
-            return
-        with _new_scope('') as scope:
-            # First populate
-            _LOG.debug("populating scope")
-            for statement in self.content:
-                if statement.value.is_a(Declaration):
-                    scope.variables.append(statement.value.identity.lhs)
-                    if statement.value.initial is not None and not statement.value.initial.is_a(Scope):
-                        statement.value.initial.check()
-                else:
-                    _LOG.debug("Checking statement %r", statement)
-                    yield from statement.check()
-            # Then check nested scopes
-            _LOG.debug("Checking nested scopes")
-            for statement in self.content:
-                if statement.value.is_a(
-                        Declaration) and statement.value.initial is not None and statement.value.initial.is_a(Scope):
-                    yield from statement.check()
-
-            # last = self.content[-1]
-            # for statement in self.content:
-            #     yield from statement.check()
-            #     if isinstance(statement, ReturnStatement) and statement is not last:
-            #         yield CompilerNotice("Error", "Scope contains multiple top-level return statments", statement.location)
-    """
-
 
 ALLOWED_AT_TOP_LEVEL: TypeAlias = Declaration | TypeDeclaration | Namespace
 
@@ -551,7 +529,15 @@ class Document(Lex):
     content: list[ALLOWED_AT_TOP_LEVEL]
 
     def __str__(self) -> str:
-        return ''.join(str(s) for s in self.content)
+        return ''.join(self.to_code())
+        # return ''.join(str(s) for s in self.content)
+
+    def to_code(self) -> Iterable[str]:
+        for x in self.raw:
+            if isinstance(x, Lex):
+                yield from x.to_code()
+            else:
+                yield x.value
 
     def __repr__(self) -> str:
         inner = ', '.join(repr(s) for s in self.content)
@@ -562,43 +548,28 @@ class Document(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        declarations: list[Declaration] = []
-        while (res := Declaration.try_lex(stream)):
-            declarations.append(res)
+        raw: list[Token | Lex] = []
 
-        if not stream.eof:
-            return None
+        declarations: list[ALLOWED_AT_TOP_LEVEL] = []
+        while True:
+            tok = stream.peek()
+            _LOG.debug(f"In document gettin a {tok}")
+            if tok.type == TokenType.EOF:
+                break
+            if tok.type in NON_CODE_TOKEN_TYPES:
+                raw.append(stream.pop())
+                continue
+            _LOG.debug(f"In document looking for a Decl")
+            if (res := Declaration.try_lex(stream)) is None:
+                break
+            declarations.append(res)
+            raw.append(res)
+
+        stream.expect(TokenType.EOF)
 
         if not declarations:
             location = SourceLocation((0, 0), (1, 1), (1, 1))
         else:
-            location = SourceLocation.from_to(declarations[0].location, declarations[-1].location)
+            location = SourceLocation.from_to(raw[0].location, raw[-1].location)
 
-        if not stream.eof:
-            raise LexError("Could not parse entire file.")
-
-        return cls(declarations, location=location)
-
-    """
-    def check(self):
-        with _new_scope('') as scope:
-            # First populate
-            _LOG.debug("Populating document scope")
-            for statement in self.content:
-                if not isinstance(statement.value, Declaration):
-                    yield CompilerNotice("Error", f"Documents can only contain Declarations.", statement.location)
-                else:
-                    if scope.in_scope(statement.value.identity.lhs.value):
-                        yield CompilerNotice(
-                            "Warning",
-                            f"{statement.value.identity.lhs.value!r} is shadowing an identifier from the parent scope!",
-                            statement.value.identity.lhs.location)
-                    scope.variables[statement.value.identity.lhs.value] = statement.value.identity.rhs
-                    if statement.value.initial is not None and not statement.value.initial.is_a(Scope):
-                        statement.value.initial.check()
-            # Then check nested scopes
-            for statement in self.content:
-                if statement.value.is_a(
-                        Declaration) and statement.value.initial is not None and statement.value.initial.is_a(Scope):
-                    yield from statement.check()
-    """
+        return Document(raw, declarations, location=location)

@@ -46,7 +46,3 @@ class ParamList(Lex):
             stream.pop()
         end = stream.expect(TokenType.RParen).location
         return cls(params, location=SourceLocation.from_to(start, end))
-
-    def check(self):
-        for param in self.params:
-            yield from param.check()

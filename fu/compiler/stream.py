@@ -1,7 +1,7 @@
 from io import TextIOBase
 from contextlib import contextmanager
 from typing import TypeVar, Generic, Any, Iterator
-import inspect
+from logging import getLogger
 
 from . import StrStream as _StrStream, Stream as _Stream, TokenStream as _TokenStream
 from .tokenizer import TokenType, Token
@@ -39,6 +39,11 @@ class StrStream(_StrStream):
         self.__depth = depth
         # print(f'created stream {self.__pos=}, {self.__line_pos=}, {self.__line=}')
 
+    @contextmanager
+    def clone(self) -> Iterator[_StrStream]:
+        raise NotImplementedError()
+        yield self  # noqa  # pylint:disable=W0101
+
     @property
     def position(self) -> tuple[int, int, int]:
         return self.__pos, self.__line_no, self.__line_pos + 1
@@ -64,7 +69,7 @@ class StrStream(_StrStream):
     def peek(self) -> str:
         if self.eof:
             # print('+ Peek<EOF>')
-            return None
+            raise EOFError()
         self.__peeked += 1
         ret = self.__line[self.__line_pos]
         # print(f'+ Peek<{ret}>')
@@ -74,7 +79,7 @@ class StrStream(_StrStream):
     def pop(self) -> str:
         if self.eof:
             # print('+ Pop<EOF>')
-            return None
+            raise EOFError()
         # self.__peeked += 1
         self.__popped += 1
         ret = self.__line[self.__line_pos]
@@ -114,6 +119,7 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
     peeked: int = 0
     popped: int = 0
     _generator: Iterator[T] | None
+    _LOG = getLogger(__package__ + '.' + 'ListStream')
 
     def __init__(self, items: list[T], index=0, depth=0, generator=None) -> None:
         self._list = items
@@ -147,20 +153,25 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
 
     def _try_get_more(self):
         if self._generator is None:
+            self._LOG.debug(f"Tried to get more, but no generator")
             return
         if self.index != len(self._list):
             return
+        self._LOG.debug("Trying to get more")
         try:
-            self._list.append(next(self._generator))
+            more = next(self._generator)
+            self._LOG.debug(f"Got more: {more}")
+            self._list.append(more)
         except StopIteration:
             self._generator = None
+            self._LOG.debug(f"no more")
 
     # _who_called = {}
 
-    def peek(self) -> T | None:
+    def peek(self) -> T:
         if self.eof:
-            return None
-        stack = inspect.stack()[1].frame
+            raise EOFError()
+        # stack = inspect.stack()[1].frame
 
         # if (caller_class := stack.f_locals.get('self', stack.f_locals.get('cls', None))) is not None:
         #     if caller_class not in ListStream._who_called:
@@ -172,9 +183,9 @@ class ListStream(Generic[T], _Stream[T, 'ListStream[T]']):
         self._try_get_more()
         return ret
 
-    def pop(self) -> T | None:
+    def pop(self) -> T:
         if self.eof:
-            return None
+            raise EOFError()
         # self._peeked += 1
         self.popped += 1
         self.index += 1

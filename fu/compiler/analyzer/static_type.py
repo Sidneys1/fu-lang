@@ -83,20 +83,23 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
     _LOG.debug(f"Creating new type `{decl.name.value}{extra}`.")
     assert not (decl.definition is None or isinstance(decl.definition, Type_))
     this = ThisType()
-    vars: dict[str, StaticVariableDecl] = {'this': StaticVariableDecl(this, decl)}
+    this_decl = StaticVariableDecl(this, decl)
+    vars: dict[str, StaticVariableDecl] = {}
     generic_params: dict[str, GenericType.GenericParam] = {}
     if decl.generic_params is not None and len(set(x.value for x in decl.generic_params.params)) != len(
             decl.generic_params.params):
         raise CompilerNotice('Error', "Generic parameter names must be unique.", decl.generic_params.location)
+
     for x in decl.generic_params.params if decl.generic_params is not None else ():
         if (outer_type := outer_scope.in_scope(x.value)) is not None:
-            yield CompilerNotice(
-                'Warning', f"Generic type `{x.value}` shadows existing `{x.value}`, a `{outer_type.name}`.".x.location)
+            yield CompilerNotice('Warning',
+                                 f"Generic type `{x.value}` shadows existing `{x.value}`, a `{outer_type.name}`.",
+                                 x.location)
         g = GenericType.GenericParam(x.value)
         generic_params[x.value] = g
         vars[x.value] = StaticVariableDecl(g, x)
 
-    with StaticScope.new(decl.name.value, vars=vars) as scope:
+    with AnalyzerScope.new(decl.name.value, vars=vars, this_decl=this_decl) as scope:
         inherits: list[TypeBase] = []
         errors = False
         special_operators: dict[SpecialOperatorType, tuple[tuple[TypeBase, ...], TypeBase]] = {}
@@ -104,17 +107,17 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
             match element:
                 case Declaration(identity=Identity(lhs=Identifier(value='this'))):
                     if element.initial is not None:
-                        yield CompilerNotice('Error', f"Inheritance `this: <type>` cannot have an assignment.",
+                        yield CompilerNotice('Error', "Inheritance `this: <type>` cannot have an assignment.",
                                              element.initial.location)
                         continue
                     if any(isinstance(x, (ParamList, ArrayDef)) for x in element.identity.rhs.mods):
-                        yield CompilerNotice('Error', f"Types cannot inherit from functions or arrays.",
+                        yield CompilerNotice('Error', "Types cannot inherit from functions or arrays.",
                                              element.identity.rhs.location)
                         errors = True
                         # input(f"can't inherit `{element.identity.rhs}`")
                         continue
                     if any(isinstance(x, GenericType.GenericParam) for x in element.identity.rhs.mods):
-                        yield CompilerNotice('Error', f"Types cannot inherit directly from generic parameters.",
+                        yield CompilerNotice('Error', "Types cannot inherit directly from generic parameters.",
                                              element.identity.rhs.location)
                         errors = True
                         # input(f"can't inherit `{element.identity.rhs}`")
@@ -122,7 +125,7 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                     base = scope.in_scope(element.identity.rhs.ident.value)
                     assert isinstance(base, StaticVariableDecl)
                     if isinstance(base.type, IntegralType):
-                        yield CompilerNotice('Error', f"Types cannot inherit from integral types.",
+                        yield CompilerNotice('Error', "Types cannot inherit from integral types.",
                                              element.identity.rhs.location)
                         errors = True
                         # input(f"can't inherit `{element.identity.rhs}`")
@@ -132,12 +135,13 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                     continue
                 case Declaration(identity=SpecialOperatorIdentity()):
                     assert isinstance(element.identity, SpecialOperatorIdentity)
-                    scope = StaticScope.current()
+                    scope = AnalyzerScope.current()
                     name = element.identity.lhs
                     if name.value in scope.members:
                         # TODO: something something overloads
                         yield CompilerNotice('Error',
-                                             f"Special operator `{name}` already implemented for type `{scope.name}`.")
+                                             f"Special operator `{name}` already implemented for type `{scope.name}`.",
+                                             element.location)
                         errors = True
                         # input(f"Already have special operator `{element.identity.lhs}`")
                         continue
@@ -170,22 +174,27 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                     # Add to current scope
                     t = type_from_lex(element.identity.rhs, scope)
                     _LOG.debug(f"Adding `{name}` to type `{scope.fqdn}` as `{t.name}`.")
-                    scope.members[name.value] = StaticVariableDecl(t, element)
+                    svd = StaticVariableDecl(t, element)
+                    scope.members[name.value] = t
+                    this.members[name.value] = t
+                    this_decl.member_decls[name.value] = svd
                     special_operators[name] = t.callable
                     continue
                 # case Declaration():
                 #     raise NotImplementedError(f"Don't know how to create from {elems}")
                 # case TypeDeclaration(initial=None):
                 #     raise NotImplementedError(f"Don't know how to create from {elems}")
+            from . import _populate
             yield from _populate(element)
         if errors:
-            _LOG.warn('Aborting type creation: there were errors!')
+            _LOG.warning('Aborting type creation: there were errors!')
             return
         for k, v in scope.members.items():
             if isinstance(v, StaticScope):
                 raise NotImplementedError("Nested type scopes??")
 
-        members = {k: v.type for k, v in scope.members.items() if not isinstance(v, StaticScope) and k != 'this'}
+        members = {k: v for k, v in this.members.items() if not isinstance(v, StaticScope)}
+
         # TODO: calc size
         if decl.generic_params:
             new_type = GenericType(decl.name.value,
@@ -207,5 +216,5 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                                                   decl,
                                                                   member_decls={
                                                                       k: v
-                                                                      for k, v in scope.members.items() if k != 'this'
+                                                                      for k, v in this.members.items()
                                                                   })

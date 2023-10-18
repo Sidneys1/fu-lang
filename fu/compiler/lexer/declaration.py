@@ -2,7 +2,7 @@ from typing import Union, Self, TYPE_CHECKING, Union, Literal as Literal_
 from dataclasses import dataclass
 
 from .. import TokenStream
-from ..tokenizer import SourceLocation, TokenType
+from ..tokenizer import SourceLocation, TokenType, Token
 
 from . import (Identifier, Identity, Lex, LexError, Namespace, Type_, SpecialOperatorIdentity, _indent, _tab, ExpList,
                GenericParamList)
@@ -86,81 +86,93 @@ class Declaration(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        from . import Scope
-        identity: Identity
+        from . import Scope, Expression
+
+        raw: list[Lex, Token] = []
+
+        identity: Identity | None
         id_stack: list[Identifier] = []
         # metadata = None
         start: SourceLocation
         end: SourceLocation
         initial = None
 
-        if (tok := stream.peek()) is not None and tok.type == TokenType.LBracket:
-            start = stream.pop().location
-            # metadata = MetadataList.try_lex(stream)
-            stream.expect(TokenType.RBracket)
+        # if (tok := stream.peek()) is not None and tok.type == TokenType.LBracket:
+        #     start = stream.pop().location
+        #     metadata = MetadataList.try_lex(stream)
+        #     stream.expect(TokenType.RBracket)
 
         if (identity := Identity.try_lex(stream)) is None:
             # Maybe dotted?
             if (first_id := Identifier.try_lex(stream)) is None:
-                return
+                return None
+            raw.append(first_id)
             # print(first_id)
             id_stack.append(first_id)
             start = first_id.location
             while (tok := stream.peek()) is not None and tok.type == TokenType.Dot:
-                stream.pop()
+                raw.append(stream.pop())
                 if (next_id := Identifier.try_lex(stream)) is None:
                     raise LexError("Trailing Dot, expected `Identifier` or `Identity`.")
                 id_stack.append(next_id)
+                raw.append(next_id)
                 # print(first_id, *id_stack, sep='.')
             if (tok := stream.peek()) is None or tok.type != TokenType.Colon:
-                return
-            stream.expect(TokenType.Colon)
+                return None
+            raw.append(stream.expect(TokenType.Colon))
             if (tok := stream.pop()) is None:
-                return
+                return None
             if tok.type != TokenType.NamespaceKeyword:
-                return
-            stream.expect(TokenType.Equals)
-            stream.expect(TokenType.LBrace)
+                return None
+            raw.append(tok)
+            raw.append(stream.expect(TokenType.Equals))
             from . import StaticScope
-            if (static_scope := StaticScope.try_lex(stream)) is None:
-                raise RuntimeError()
-            stream.expect(TokenType.RBrace)
-            end = stream.expect(TokenType.Semicolon).location
-            return Namespace(id_stack, static_scope, location=SourceLocation.from_to(start, end))
-        else:
-            start = identity.location
+            static_scope = StaticScope.try_lex(stream)
+            assert static_scope is not None
+            raw.append(static_scope)
+            tok = stream.expect(TokenType.Semicolon)
+            raw.append(tok)
+            end = tok.location
+            return Namespace(raw, id_stack, static_scope, location=SourceLocation.from_to(start, end))
+
+        start = identity.location
+        raw.append(identity)
 
         if identity.rhs.ident.value in ('type', 'interface'):
             if len(id_stack) > 1:
-                return
+                return None
             if (tok := stream.pop()) is None:
-                return
+                return None
+            raw.append(tok)
 
             if len(identity.rhs.mods) > 1 or any(not isinstance(m, GenericParamList) for m in identity.rhs.mods):
-                return
+                return None
 
             generic_mod = identity.rhs.mods[0] if identity.rhs.mods else None
 
             if tok.type == TokenType.Semicolon:
-                return TypeDeclaration(identity.lhs,
+                return TypeDeclaration(raw,
+                                       identity.lhs,
                                        identity.rhs.ident.value,
                                        location=SourceLocation.from_to(start, tok.location))
             if tok.type != TokenType.Equals:
-                return
+                return None
             # Either a Type_ or a body.
             if (tok := stream.peek()) is not None and tok.type == TokenType.LBrace:
-                stream.pop()
+                raw.append(stream.pop())
                 inner: list[Declaration | TypeDeclaration] = []
                 while (lex := Declaration.try_lex(stream)) is not None:
                     inner.append(lex)
-                stream.expect(TokenType.RBrace)
+                    raw.append(lex)
+                raw.append(stream.expect(TokenType.RBrace))
             elif (type_ := Type_.try_lex(stream)) is None:
-                return
-            else:
-                inner = type_
+                return None
+
+            inner = type_
+            raw.append(type_)
 
             end = stream.expect(TokenType.Semicolon).location
-            return TypeDeclaration(identity.lhs,
+            return TypeDeclaration(raw,
                                    identity.rhs.ident.value,
                                    inner,
                                    generic_mod,
