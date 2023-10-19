@@ -11,7 +11,7 @@ from .._populate import _populate
 from ..scope import AnalyzerScope
 from ..static_variable_decl import OverloadedMethodDecl, StaticVariableDecl
 from ..static_type import type_from_lex
-from ..resolvers import resolve_type
+from ..resolvers import resolve_type, resolve_owning_type
 
 from ._assigns_to import _assigns_to
 
@@ -58,7 +58,7 @@ def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice
     assert isinstance(params, ParamList)
 
     props = {
-        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, StaticScope.current()).as_const(), p)
+        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
         for p in params.params if isinstance(p, Identity) or (isinstance(p, Type_) and p.ident.value != 'this')
     }
     # input(f"Constructor props: {params.params} -> {props.keys()}")
@@ -68,7 +68,7 @@ def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice
     assert isinstance(this_type, TypeBase), f"`this` was unexpectedtly a `{type(this_type).__name__}`."
     props['this'] = StaticVariableDecl(this_type, element, member_decls=this_decl.member_decls)
     assert isinstance(ctor.initial, Scope)
-    with StaticScope.new(ctor.identity.lhs.value, vars=props):
+    with AnalyzerScope.new(ctor.identity.lhs.value, vars=props):
         CHECKED_ELEMENTS.append(ctor)
         # yield from _check(ctor.initial)
         CHECKED_ELEMENTS.append(ctor.initial)
@@ -132,7 +132,7 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
         if lhs_type.callable is None:
             raise CompilerNotice(
                 "Error",
-                f"Type of {element.identity.lhs.value!r} is not callable ({lhs_type}) but is initialized with a body.",
+                f"`{element.identity}` is not callable but is initialized with a body.",
                 element.identity.location)
         elif not element.initial.content:
             yield CompilerNotice('Warning', "Method initialized with an empty body.", element.initial.location)
@@ -224,8 +224,8 @@ def _check_infix_operator(element: Operator) -> Iterator[CompilerNotice]:
 def _check(element: Lex) -> Iterator[CompilerNotice]:
     scope = AnalyzerScope.current()
     # _LOG.debug(f"Checking {type(element).__name__} in {scope.fqdn}")
-    if element in CHECKED_ELEMENTS:
-        raise RuntimeError("Element checked more than once!")
+    # if element in CHECKED_ELEMENTS:
+    #     raise RuntimeError("Element checked more than once!")
     CHECKED_ELEMENTS.append(element)
     match element:
         case Identifier():
@@ -435,8 +435,9 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                 return
         case Namespace():
             with ExitStack() as ex:
-                for name in element.name:
-                    ex.enter_context(StaticScope.enter(name, location=element.location))
+                for ident in element.name:
+                    name = ident.value
+                    ex.enter_context(AnalyzerScope.enter(name, location=element.location))
                 for decl in element.static_scope:
                     yield from _check(decl)
         case Document():

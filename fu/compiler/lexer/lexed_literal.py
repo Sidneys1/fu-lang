@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Iterable
 
 from . import Lex
 from ..tokenizer import TokenType
@@ -8,6 +9,9 @@ from ..tokenizer import TokenType
 class LexedLiteral(Lex):
     value: str
     type: TokenType
+
+    def to_code(self) -> Iterable[str]:
+        yield self.value
 
     def __str__(self) -> str:
         if self.type == TokenType.String:

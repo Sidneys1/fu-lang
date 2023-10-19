@@ -14,7 +14,7 @@ from ..virtual_machine.bytecode.builder import BytecodeBuilder
 from ..virtual_machine.bytecode.structures import *
 
 from . import CompilerNotice
-from .analyzer.scope import GLOBAL_SCOPE, AnalyzerScope, StaticVariableDecl, _CURRENT_ANALYZER_SCOPE
+from .analyzer.scope import AnalyzerScope, StaticVariableDecl, _CURRENT_ANALYZER_SCOPE
 from .analyzer.static_type import type_from_lex
 from .lexer import (Declaration, Identifier, Identity, Lex, Operator, ParamList, ReturnStatement, Scope, Statement,
                     LexedLiteral)
@@ -162,9 +162,9 @@ def stream_to_bytes(in_: Iterator[BytecodeTypes], silent=False) -> Iterator[byte
 _BUILDER = BytecodeBuilder()
 
 
-def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
+def compile(scope: AnalyzerScope) -> Generator[CompilerNotice, None, BytecodeBinary | None]:
     _LOG.debug('\n\n\033#3STARTED COMPILING\n\033#4STARTED COMPILING\n\n')
-    main = GLOBAL_SCOPE.members.get('main')
+    main = scope.members.get('main')
 
     if main is None:
         # dll?

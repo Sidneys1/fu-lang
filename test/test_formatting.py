@@ -29,6 +29,41 @@ foo: namespace = {
 // Another one
 """
 
+FAKE_DECL = """foo: u8 = 0;"""
+FAKE_FUNC = """main: void() = { };"""
+FAKE_FUNC_COMMENT = """\
+main: void() = {
+  // Comment!
+};"""
+FAKE_FUNC_RETURN = """\
+main: u8(x: u8) = {
+  return x;
+};"""
+FAKE_FUNC_STATEMENT = """\
+main: u8(x: u8, y: u8) = {
+  x = (x + 3);
+};"""
+
+FAKE_TYPE = """bar: type;"""
+FAKE_TYPE_ALIAS = """bar: type = u8;"""
+FAKE_TYPE_EMPTY = """bar: type = { };"""
+FAKE_TYPE_DEF = """\
+bar: type = {
+  // Comment!
+  this: u8;
+};"""
+FAKE_TYPE_GENERIC = """\
+bar: type<T> = {
+  this: T;
+};"""
+
+FAKE_OPER_DOT = """x: void = a.b;"""
+FAKE_OPER_PAREN = """x: void = a(b);"""
+FAKE_OPER_BRACE = """x: void = a[0];"""
+FAKE_OPER_PRE = """x: void = -x;"""
+FAKE_OPER_NEG = """x: void = -0;"""
+FAKE_OPER_PRECENDENCE = """x: void = 1 * (2 + 3);"""
+
 FAKE_FILES = (
     FAKE_EMPTY_FILE,
     FAKE_NEWLINE_FILE,
@@ -37,32 +72,25 @@ FAKE_FILES = (
     FAKE_BLOCK_COMMENT_FILE,
     FAKE_NAMESPACE,
     FAKE_NAMESPACE_COMMENTS,
+    FAKE_DECL,
+    FAKE_FUNC,
+    FAKE_FUNC_COMMENT,
+    FAKE_FUNC_RETURN,
+    FAKE_FUNC_STATEMENT,
+    FAKE_TYPE,
+    FAKE_TYPE_ALIAS,
+    FAKE_TYPE_EMPTY,
+    FAKE_TYPE_DEF,
+    FAKE_TYPE_GENERIC,
+    FAKE_OPER_DOT,
+    FAKE_OPER_PAREN,
+    FAKE_OPER_BRACE,
+    FAKE_OPER_PRE,
+    FAKE_OPER_NEG,
+    FAKE_OPER_PRECENDENCE,
 )
 
-
-class FakeFile(AbstractContextManager[StringIO]):
-    """Represents a fake file based on StringIO contents."""
-
-    def __init__(self, fake_path: str, contents: str) -> None:
-        self._fake_path = fake_path
-        self._contents = contents
-        self._io: StringIO | None = None
-        self._tok: Optional['CtxToken'] = None
-
-    def __enter__(self) -> Any:
-        from fu.compiler import SourceFile
-        assert self._tok is None and self._io is None
-        self._tok = SourceFile.set(self._fake_path)
-        self._io = StringIO(self._contents)
-        return self._io
-
-    def __exit__(self, *_) -> bool | None:
-        from fu.compiler import SourceFile
-        assert self._tok is not None and self._io is not None
-        SourceFile.reset(self._tok)
-        self._tok = None
-        self._io = None
-        return None
+from conftest import FakeFile
 
 
 def _test_formatting(input_: str, output: str):
@@ -75,7 +103,7 @@ def _test_formatting(input_: str, output: str):
 
 
 @mark.parametrize('content', FAKE_FILES)
-def test_formatting_fake(content):
+def test_formatting_fake(global_scope, content):
     from fu.compiler import ImmutableTokenStream
     from fu.compiler.stream import TokenStream, StrStream
     from fu.compiler.tokenizer import Token
@@ -90,7 +118,37 @@ def test_formatting_fake(content):
     _test_formatting(content, str(document))
 
 
-def test_formatting_builtins():
+@mark.parametrize('content', FAKE_FILES)
+def test_repr_fake(global_scope, content):
+    from fu.compiler import ImmutableTokenStream
+    from fu.compiler.stream import TokenStream, StrStream
+    from fu.compiler.tokenizer import Token
+    from fu.compiler.lexer import parse
+
+    with FakeFile('empty.py', content) as file:
+        stream = TokenStream([], generator=Token.token_generator(StrStream(file)))
+        document = parse(cast(ImmutableTokenStream, stream))
+
+    assert document is not None, "Failed to parse."
+    repr(document)
+
+
+@mark.parametrize('content', FAKE_FILES)
+def test_unrepr_fake(global_scope, content):
+    from fu.compiler import ImmutableTokenStream
+    from fu.compiler.stream import TokenStream, StrStream
+    from fu.compiler.tokenizer import Token
+    from fu.compiler.lexer import parse
+
+    with FakeFile('empty.py', content) as file:
+        stream = TokenStream([], generator=Token.token_generator(StrStream(file)))
+        document = parse(cast(ImmutableTokenStream, stream))
+
+    assert document is not None, "Failed to parse."
+    document.unrepr()
+
+
+def test_formatting_builtins(global_scope, ):
     from fu.compiler.discovery import parse_file, DEFAULT_STD_ROOT
 
     document = parse_file(DEFAULT_STD_ROOT / '__builtins__.fu')

@@ -5,11 +5,12 @@ from logging import getLogger, basicConfig, DEBUG, INFO, ERROR
 from pathlib import Path
 from typing import Protocol
 
-from fu.compiler.discovery import DEFAULT_STD_ROOT
-
 from . import NAME
-from .discovery import load_std, discover_files
+from .analyzer.scope import AnalyzerScope, set_global_scope
+from .discovery import load_std, discover_files, DEFAULT_STD_ROOT
 from .lexer import Document
+from .console import render_error
+from .analyzer import check_program
 
 _LOG = getLogger(__package__)
 
@@ -61,41 +62,11 @@ def main(*args) -> int:
         getLogger(__package__ + ".lexer").setLevel(level=ERROR)
         basicConfig(level=INFO)
 
-    docs: list[Document] = list(load_std(ns.std_root))
-    docs.extend(discover_files(ns.root))
-    # SourceFile.set(str(ns.root))
-
-    # str_stream = StrStream(ns.FILE)
-
-    # token_stream = TokenStream([], generator=Token.token_generator(str_stream))
-
-    # lex = parse(token_stream)
-
-    # peeks, pops = str_stream.efficiency
-    # print(f"Chars: {peeks=}, {pops=}, {pops/(pops+peeks or 1):0.2%}")
-    # peeks, pops = token_stream.efficiency
-    # print(f"Tokens: {peeks=}, {pops=}, {pops/(pops+peeks or 1):0.2%}")
-    # if not token_stream.eof:
-    #     print(f"Failed at: {token_stream.peek()}")
-    #     return 1
-    # if lex is None:
-    #     print(f'Failed to lex.')
-    #     return 1
-
-    # for klass, calls in sorted(token_stream._who_called.items(), key=lambda t: t[1], reverse=True):
-    #     print(klass.__name__, calls)
-
-    # print('```\n' + str(lex) + '```')
-
-    # lex.unrepr()
-
-    # input()
-
-    from .console import render_error
-
-    from .analyzer import check_program
-    # docs.append(lex)
-    errors = list(check_program(docs))
+    global_scope = AnalyzerScope(None)
+    with set_global_scope(global_scope):
+        docs: list[Document] = list(load_std(ns.std_root))
+        docs.extend(discover_files(ns.root))
+        errors = list(check_program(docs))
 
     if all(error.level.lower() not in ('error', 'critical') for error in errors):
         from .compile import compile

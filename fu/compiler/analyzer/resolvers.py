@@ -184,7 +184,7 @@ def resolve_type(element: Lex,
 
 def resolve_owning_type(element: Lex) -> tuple[StaticVariableDecl, StaticVariableDecl]:
     _LOG.debug(f"Trying to find owning type of `{element}`.")
-    scope = StaticScope.current()
+    scope = AnalyzerScope.current()
     match element:
         case Operator(oper=Token(type=TokenType.Dot), rhs=Identifier()):
             _LOG.debug(f"Trying to find `{element.rhs}` in `{element.lhs}`.")

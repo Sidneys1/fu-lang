@@ -108,6 +108,16 @@ class AnalyzerScope:
         return None
 
 
-GLOBAL_SCOPE = AnalyzerScope(None)
-_CURRENT_ANALYZER_SCOPE: ContextVar[AnalyzerScope] = ContextVar('_SCOPE', default=GLOBAL_SCOPE)
+_CURRENT_ANALYZER_SCOPE: ContextVar[AnalyzerScope] = ContextVar('_SCOPE')
 _PARSING_BUILTINS: ContextVar[bool] = ContextVar('_PARSING_BUILTINS', default=False)
+
+@contextmanager
+def set_global_scope(scope: AnalyzerScope):
+    """Set the global static analysis scope."""
+    assert scope.name is None
+    assert _CURRENT_ANALYZER_SCOPE.get(None) is None
+    reset = _CURRENT_ANALYZER_SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _CURRENT_ANALYZER_SCOPE.reset(reset)

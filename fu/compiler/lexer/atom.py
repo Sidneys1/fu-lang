@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Iterable, Union
 
 from .. import TokenStream, SourceLocation
-from ..tokenizer import TokenType
+from ..tokenizer import TokenType, Token
 
 from . import Lex, Identifier, LexedLiteral, LexError
 
@@ -15,21 +15,25 @@ class Atom(Lex):
     """Atom: Literal | Identifier | '(' Expression ')'"""
     value: Union[LexedLiteral, Identifier, 'Expression']
 
-    def __str__(self) -> str:
-        return f"({self.value})"
+    def to_code(self) -> Iterable[str]:
+        yield '('
+        yield from self.value.to_code()
+        yield ')'
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         from . import Expression
         if (x := stream.peek()) is not None and x.type == TokenType.LParen:
-            start = stream.pop().location
+            raw: list[Lex | Token] = []
+            raw.append(stream.pop())
             if (body := Expression.try_lex(stream)) is None:
                 raise LexError("Expected `Expression`.")
-            end = stream.expect(TokenType.RParen).location
-            return cls(body, location=SourceLocation.from_to(start, end))
+            raw.append(body)
+            raw.append(stream.expect(TokenType.RParen))
+            return Atom(raw, body, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
         if not stream.eof and stream.peek().type in (TokenType.String, TokenType.Number):
             tok = stream.pop()
-            return LexedLiteral(tok.value, tok.type, location=tok.location)
+            return LexedLiteral([tok], tok.value, tok.type, location=tok.location)
 
         return Identifier.try_lex(stream)

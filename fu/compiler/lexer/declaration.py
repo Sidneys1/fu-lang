@@ -1,8 +1,8 @@
-from typing import Union, Self, TYPE_CHECKING, Union, Literal as Literal_
+from typing import Iterable, Union, Self, TYPE_CHECKING, Union, Literal as Literal_
 from dataclasses import dataclass
 
 from .. import TokenStream
-from ..tokenizer import SourceLocation, TokenType, Token
+from ..tokenizer import SourceLocation, TokenType, Token, NON_CODE_TOKEN_TYPES
 
 from . import (Identifier, Identity, Lex, LexError, Namespace, Type_, SpecialOperatorIdentity, _indent, _tab, ExpList,
                GenericParamList)
@@ -18,27 +18,57 @@ class TypeDeclaration(Lex):
     definition: Type_ | list[Union['Declaration', 'TypeDeclaration']] | None = None
     generic_params: GenericParamList | None = None
 
+    def to_code(self) -> Iterable[str]:
+        yield self.name.value
+        yield f": {self.type}"
+        if self.generic_params is not None:
+            yield from self.generic_params.to_code()
+        if self.definition is None:
+            yield ';'
+            return
+        yield ' = '
+        if isinstance(self.definition, Type_):
+            yield from self.definition.to_code()
+        elif isinstance(self.definition, list):
+            lbracket = next((x for x in self.raw if isinstance(x, Token) and x.type == TokenType.LBrace), None)
+            assert lbracket is not None
+            lindex = self.raw.index(lbracket)
+            rbracket = next((x for x in reversed(self.raw) if isinstance(x, Token) and x.type == TokenType.RBrace),
+                            None)
+            assert rbracket is not None
+            rindex = self.raw.index(rbracket)
+            if rindex == lindex + 1:
+                yield '{ }'
+            else:
+                yield '{'
+                with _indent() as tab:
+                    for x in self.raw[lindex + 1:rindex]:
+                        if isinstance(x, Lex):
+                            yield from x.to_code()
+                        elif x.type == TokenType.BlankLine:
+                            yield x.value
+                        else:
+                            yield tab + x.value
+                yield '}'
+        else:
+            assert False, "Should never happen"
+        yield ';'
+        # for x in self.raw:
+        #     if isinstance(x, Lex):
+        #         yield from x.to_code()
+        #     else:
+        #         yield x.value
+        # yield f"{self.name.value}: {self.type}"
+        # if isinstance(self.definition, Type_):
+        #     yield from self.definition.to_code()
+        # elif isinstance(self.definition, list):
+        #     # yield from
+        # yield ';'
+
     def _s_expr(self) -> tuple[str, list[Self]]:
         if self.definition is None:
             return "typedecl", []
         return "typedecl", [self.name] + (self.definition if isinstance(self.definition, list) else [self.definition])
-
-    def __str__(self) -> str:
-        build = ''
-
-        # if self.metadata:
-        #     build += f"[{self.metadata}]\n{_tab()}"
-
-        build += str(self.name) + ': type'
-
-        if self.definition is None:
-            return build + ';\n'
-        if isinstance(self.definition, Type_):
-            return f"{build} = {self.definition};\n"
-        build += ' = {\n'
-        with _indent():
-            inner = _tab() + _tab().join(str(x) for x in self.definition)
-        return build + inner + _tab() + '};\n'
 
     def __repr__(self) -> str:
         after = '' if self.definition is None else f'={self.definition!r}'
@@ -51,26 +81,33 @@ class Declaration(Lex):
     identity: Identity | SpecialOperatorIdentity
     initial: Union['Scope', 'Expression', ExpList, None] = None
 
+    def to_code(self) -> Iterable[str]:
+        yield from self.identity.to_code()
+        if self.initial is not None:
+            yield ' = '
+            yield from self.initial.to_code()
+        yield ';'
+
     # metadata: MetadataList | None = None
 
-    def __str__(self) -> str:
-        from . import Scope, Statement
-        if self.identity is not None and self.identity.rhs == 'namespace' and isinstance(self.initial, Scope) and len(
-                self.initial.content) == 1 and isinstance(self.initial.content[0], Statement) and isinstance(
-                    self.initial.content[0].value,
-                    Declaration) and self.initial.content[0].value.identity.rhs == 'namespace':
-            return f"{self.identity.lhs}.{self.initial.content[0].value}"
+    # def __str__(self) -> str:
+    #     from . import Scope, Statement
+    #     if self.identity is not None and self.identity.rhs == 'namespace' and isinstance(self.initial, Scope) and len(
+    #             self.initial.content) == 1 and isinstance(self.initial.content[0], Statement) and isinstance(
+    #                 self.initial.content[0].value,
+    #                 Declaration) and self.initial.content[0].value.identity.rhs == 'namespace':
+    #         return f"{self.identity.lhs}.{self.initial.content[0].value}"
 
-        build = ''
+    #     build = ''
 
-        # if self.metadata:
-        #     build += f"[{self.metadata}]\n{_tab()}"
+    #     # if self.metadata:
+    #     #     build += f"[{self.metadata}]\n{_tab()}"
 
-        build += str(self.identity)
+    #     build += str(self.identity)
 
-        if self.initial is not None:
-            build += f" = {self.initial}"
-        return build + ';\n'
+    #     if self.initial is not None:
+    #         build += f" = {self.initial}"
+    #     return build + ';\n'
 
     def __repr__(self) -> str:
         after = '' if self.initial is None else f'={self.initial!r}'
@@ -130,12 +167,12 @@ class Declaration(Lex):
             static_scope = StaticScope.try_lex(stream)
             assert static_scope is not None
             raw.append(static_scope)
-            tok = stream.expect(TokenType.Semicolon)
-            raw.append(tok)
-            end = tok.location
-            return Namespace(raw, id_stack, static_scope, location=SourceLocation.from_to(start, end))
+            raw.append(stream.expect(TokenType.Semicolon))
+            return Namespace(raw,
+                             id_stack,
+                             static_scope,
+                             location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
-        start = identity.location
         raw.append(identity)
 
         if identity.rhs.ident.value in ('type', 'interface'):
@@ -154,43 +191,55 @@ class Declaration(Lex):
                 return TypeDeclaration(raw,
                                        identity.lhs,
                                        identity.rhs.ident.value,
-                                       location=SourceLocation.from_to(start, tok.location))
+                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
             if tok.type != TokenType.Equals:
                 return None
             # Either a Type_ or a body.
             if (tok := stream.peek()) is not None and tok.type == TokenType.LBrace:
                 raw.append(stream.pop())
                 inner: list[Declaration | TypeDeclaration] = []
-                while (lex := Declaration.try_lex(stream)) is not None:
+                while True:
+                    tok = stream.peek()
+                    if tok.type == TokenType.RBrace:
+                        break
+                    if tok.type in NON_CODE_TOKEN_TYPES:
+                        raw.append(stream.pop())
+                        continue
+                    if (lex := Declaration.try_lex(stream)) is None:
+                        break
                     inner.append(lex)
                     raw.append(lex)
                 raw.append(stream.expect(TokenType.RBrace))
             elif (type_ := Type_.try_lex(stream)) is None:
                 return None
+            else:
+                inner = type_
+                raw.append(inner)
 
-            inner = type_
-            raw.append(type_)
-
-            end = stream.expect(TokenType.Semicolon).location
+            raw.append(stream.expect(TokenType.Semicolon))
             return TypeDeclaration(raw,
+                                   identity.lhs,
                                    identity.rhs.ident.value,
                                    inner,
                                    generic_mod,
-                                   location=SourceLocation.from_to(start, end))
+                                   location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
         if (tok := stream.peek()) is not None and tok.type == TokenType.Equals:
-            stream.pop()
+            raw.append(stream.pop())
             if (tok := stream.peek()) is not None and tok.type == TokenType.LParen:
-                stream.pop()
+                raw.append(stream.pop())
                 exp_list = ExpList.try_lex(stream)
                 if exp_list is None:
                     raise LexError("Expected an `ExpList`!")
-                stream.expect(TokenType.RParen)
+                raw.append(exp_list)
+                raw.append(stream.expect(TokenType.RParen))
                 initial = exp_list
             elif (initial := (Scope.try_lex(stream) or Expression.try_lex(stream))) is None:
                 raise LexError("Expected a `Scope` or `Expression`!")
+            else:
+                raw.append(initial)
 
-        end = stream.expect(TokenType.Semicolon).location
+        raw.append(tok := stream.expect(TokenType.Semicolon))
 
-        ret = cls(identity, initial, location=SourceLocation.from_to(start, end))
+        ret = Declaration(raw, identity, initial, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
         return ret

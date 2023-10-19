@@ -70,7 +70,7 @@ class Lex(ABC):
                     _LOG.debug("%sWas a `%s`!", 'y ' * istream.depth, cls.__name__)
                 return ret
             except LexWarning as ex:
-                _LOG.warn("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
+                _LOG.warning("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
             # except EOFError as ex:
             #     _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
             except QuietStreamExpectError:
@@ -149,30 +149,33 @@ class ExpList(Lex):
     """CallList: Expression [',' Expression[...]];"""
     values: list[Expression]
 
-    def __str__(self) -> str:
-        inner = ', '.join(str(x) for x in self.values)
-        return f"({inner})"
+    def to_code(self) -> Iterable[str]:
+        for i, x in enumerate(self.values):
+            yield from x.to_code()
+            if i != 0:
+                yield ', '
 
     def __repr__(self) -> str:
         inner = ', '.join(repr(x) for x in self.values)
         return f"CallList<{inner}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return 'params', self.values
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        if (tok := stream.peek()) is None or tok.type == TokenType.RParen or (first :=
-                                                                              Expression.try_lex(stream)) is None:
-            return
-
-        params = [first]
+        if (tok := stream.peek()) is None or tok.type == TokenType.RParen or (n := Expression.try_lex(stream)) is None:
+            return None
+        raw: list[Lex | Token] = [n]
+        params = [n]
 
         while (tok := stream.peek()) is not None and tok.type == TokenType.Comma and stream.pop() and (
-                next := Expression.try_lex(stream)) is not None:
-            params.append(next)
+                n := Expression.try_lex(stream)) is not None:
+            raw.append(tok)
+            raw.append(n)
+            params.append(n)
 
-        return cls(params, location=SourceLocation.from_to(params[0].location, params[-1].location))
+        return ExpList(raw, params, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -180,25 +183,27 @@ class ArrayDef(Lex):
     """ArrayDef: '[' [Number] ']';"""
     size: Token | None
 
+    def to_code(self) -> Iterable[str]:
+        yield f"[{self.size.value}]" if self.size is not None else '[]'
+
     def __str__(self) -> str:
-        if self.size is not None:
-            return f"[{self.size.value}]"
-        return "[]"
+        return "[]" if self.size is None else f"[{self.size.value}]"
 
     def __repr__(self) -> str:
-        return str(self)
+        return "ArrayDef" if self.size is None else f"ArrayDef<{self.size.value}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
-        return f"is-array", [self.size.value] if self.size else []
+    def _s_expr(self) -> tuple[str, list[Lex]]:
+        return f"is-array", [self.size.value] if self.size is not None else []
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        start = stream.expect(TokenType.LBracket, quiet=True).location
+        raw: list[Lex, Token] = [stream.expect(TokenType.LBracket, quiet=True)]
         size = None
         if stream.peek().type == TokenType.Number:
             size = stream.pop()
-        end = stream.expect(TokenType.RBracket).location
-        return cls(size, location=SourceLocation.from_to(start, end))
+            raw.append(size)
+        raw.append(stream.expect(TokenType.RBracket))
+        return ArrayDef(raw, size, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -208,17 +213,22 @@ class Type_(Lex):
     ident: Identifier
     mods: list[ParamList | ArrayDef | GenericParamList] = field(default_factory=list)
 
+    def to_code(self) -> Iterable[str]:
+        yield self.ident.value
+        for m in self.mods:
+            yield from m.to_code()
+
     def __str__(self) -> str:
-        if not self.mods:
-            return self.ident.value
-        mods = ''.join(str(m) for m in self.mods)
-        return f"{self.ident}{mods}"
+        after = ''
+        for mod in self.mods:
+            after += str(mod)
+        return f"{self.ident.value}{after}"
 
     def __repr__(self) -> str:
         mods = ''.join(repr(m) for m in self.mods) if self.mods else ''
         return f"Type_<{self.ident.value}, {mods}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return "type", [self.ident] + self.mods
 
     @classmethod
@@ -243,7 +253,7 @@ class Type_(Lex):
                 break
             end = mod.location
             mods.append(mod)
-        return cls([ident, *mods], ident, mods, location=SourceLocation.from_to(start, end))
+        return Type_([ident, *mods], ident, mods, location=SourceLocation.from_to(start, end))
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -286,7 +296,7 @@ class Namespace(Lex):
         after = '' if not self.static_scope else f", {', '.join(repr(x) for x in self.static_scope)}"
         return f"Namespace<{'.'.join(i.value for i in self.name)}{after}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return f"namespace:{'.'.join(i.value for i in self.name)}", [x for x in self.static_scope]
 
 
@@ -312,11 +322,11 @@ class Identity(Lex):
     lhs: Identifier
     rhs: Type_
 
-    # def __str__(self) -> str:
-    #     return f"{self.lhs}: {self.rhs}"
+    def __str__(self) -> str:
+        return f"{self.lhs}: {self.rhs}"
 
     def to_code(self) -> Iterable[str]:
-        yield _tab() + self.lhs.value + ': ' + ''.join(self.rhs.to_code())
+        yield _tab() + ''.join(self.lhs.to_code()) + ': ' + ''.join(self.rhs.to_code())
 
     def __repr__(self) -> str:
         return f"Identity<{self.lhs!r}, {self.rhs!r}>"
@@ -366,7 +376,7 @@ class MetadataList(Lex):
     def __str__(self) -> str:
         return f'{", ".join(str(m) for m in self.metadata)}'
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return "metadata", self.metadata
 
     @classmethod
@@ -401,8 +411,10 @@ class Statement(Lex):
     def allowed(self) -> Iterable[type[Lex]]:
         return [Expression]
 
-    def __str__(self) -> str:
-        return f'{_tab()}{self.value};\n'
+    def to_code(self) -> Iterable[str]:
+        yield _tab()
+        yield from self.value.to_code()
+        yield ';'
 
     def __repr__(self) -> str:
         return f"Statement<{self.value!r}>"
@@ -413,9 +425,9 @@ class Statement(Lex):
             if (res := t.try_lex(stream)) is not None:
                 break
         if res is None:
-            return
-        end = stream.expect(TokenType.Semicolon)
-        return cls(res, location=SourceLocation.from_to(res.location, end.location))
+            return None
+        raw = [res, stream.expect(TokenType.Semicolon)]
+        return Statement(raw, res, location=SourceLocation.from_to(res.location, raw[-1].location))
 
 
 ALLOWED_IN_STATIC_SCOPE: TypeAlias = Declaration
@@ -432,6 +444,7 @@ class StaticScope(Lex):
             yield '{ }'
             return
 
+        print(f"{len(self.raw)=}: {self.raw=}")
         yield '{'
         with _indent():
             for x in self.raw[1:-1]:
@@ -484,6 +497,21 @@ class Scope(Lex):
     """Scope: '{' (Statement | ReturnStatement)* '}';"""
     content: list[Union['ReturnStatement', 'Statement', Declaration]]
 
+    def to_code(self) -> Iterable[str]:
+        if len(self.raw) == 2:
+            yield '{ }'
+            return
+        yield '{'
+        with _indent() as tab:
+            for x in self.raw[1:-1]:
+                if isinstance(x, Lex):
+                    yield from x.to_code()
+                elif x.type == TokenType.BlankLine:
+                    yield x.value
+                else:
+                    yield tab + x.value
+        yield '}'
+
     def __str__(self) -> str:
         with _indent():
             inner = ''.join(str(x) for x in self.content)
@@ -495,29 +523,36 @@ class Scope(Lex):
         inner = ', '.join(repr(x) for x in self.content)
         return f"Scope<{inner}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return "scope", self.content
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        start = stream.expect(TokenType.LBrace, quiet=True)
-        ret = []
-        while not stream.eof:
+        raw: list[Lex | Token] = [stream.expect(TokenType.LBrace, quiet=True)]
+        ret: list[Union['ReturnStatement', 'Statement', Declaration]] = []
+        while True:
             match stream.peek().type:
                 case TokenType.RBrace:
-                    end = stream.pop()
-                    return cls(ret, location=SourceLocation.from_to(start.location, end.location))
+                    raw.append(stream.pop())
+                    return Scope(raw, ret, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
                 case TokenType.ReturnKeyword:
-                    ret.append(ReturnStatement.try_lex(stream))
+                    smt = ReturnStatement.try_lex(stream)
+                    assert smt is not None
+                    raw.append(smt)
+                    ret.append(smt)
+                    continue
+                case x if x in NON_CODE_TOKEN_TYPES:
+                    raw.append(stream.pop())
                     continue
                 case _:
                     if (res := Declaration.try_lex(stream)) is None and (res := Statement.try_lex(stream)) is None:
                         raise LexError("Expected `Statement` or `Declaration`!")
                     ret.append(res)
+                    raw.append(res)
                     continue
 
         end = stream.expect(TokenType.RBrace)
-        return cls(ret, location=SourceLocation.from_to(start.location, end.location))
+        return Scope(raw, ret, location=SourceLocation.from_to(start.location, end.location))
 
 
 ALLOWED_AT_TOP_LEVEL: TypeAlias = Declaration | TypeDeclaration | Namespace
@@ -543,7 +578,7 @@ class Document(Lex):
         inner = ', '.join(repr(s) for s in self.content)
         return f"Document<{inner}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         return 'document', self.content
 
     @classmethod

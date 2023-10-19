@@ -2,3 +2,6 @@
 __pycache__/
 .pyvenv/
 htmlcov/
+pytest.html
+.pytest_cache/
+.coverage

@@ -1,4 +1,4 @@
-from typing import Optional, Union, Self, TYPE_CHECKING
+from typing import Iterable, Optional, Union, Self, TYPE_CHECKING
 from dataclasses import replace, dataclass
 
 from . import _LOG, Lex, LexWarning, TokenStream, ImmutableTokenStream
@@ -55,20 +55,35 @@ class Operator(Lex):
         rhs = self.rhs.value if isinstance(self.rhs, Atom) else self.rhs
         return oper, [lhs, rhs]
 
-    def __str__(self) -> str:
+    def to_code(self) -> Iterable[str]:
         match self.oper.type:
             case TokenType.Dot:
-                return f"{self.lhs}.{self.rhs}"
+                yield from self.lhs.to_code()
+                yield '.'
+                yield from self.rhs.to_code()
+                return
             case TokenType.LParen:
-                return f"{self.lhs}{self.rhs or '()'}"
+                yield from self.lhs.to_code()
+                yield '('
+                yield from self.rhs.to_code()
+                yield ')'
+                return
             case TokenType.LBracket:
-                return f"{self.lhs}[{self.rhs or ''}]"
-
+                yield from self.lhs.to_code()
+                yield '['
+                yield from self.rhs.to_code()
+                yield ']'
+                return
         if self.lhs is None:
-            return f"{self.oper.value}{self.rhs}"
-        if self.rhs is None:
-            return f"{self.lhs}{self.oper.value}"
-        return f"{self.lhs} {self.oper.value} {self.rhs}"
+            yield self.oper.value
+            yield from self.rhs.to_code()
+        elif self.rhs is None:
+            yield from self.lhs
+            yield self.oper.value
+        else:
+            yield from self.lhs.to_code()
+            yield f' {self.oper.value} '
+            yield from self.rhs.to_code()
 
     def __repr__(self) -> str:
         match self.oper.type:
@@ -105,25 +120,27 @@ class Operator(Lex):
     def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
         from .atom import Atom
         lhs: Atom | Operator | None
-
+        raw: list[Lex, Token] = []
         if not stream.eof and stream.peek().type in (TokenType.Operator, TokenType.Dot):
             # Prefix operator
             oper = stream.pop()
+            raw.append(oper)
             assert oper is not None
             _LOG.debug("%sPrefix is %s", '| ' * stream.depth, oper.value)
             _, r_bp = PREFIX_BINDING_POWER[oper.value]
             # TODO
-            if (lhs := cls.try_lex(stream, r_bp)) is None:
-                return
+            if (lhs := Operator.try_lex(stream, r_bp)) is None:
+                return None
             from .lexed_literal import LexedLiteral
             if isinstance(lhs, LexedLiteral
                           ) and lhs.type == TokenType.Number and oper.type == TokenType.Operator and oper.value == '-':
                 lhs = replace(lhs, value='-' + lhs.value, location=SourceLocation.from_to(oper.location, lhs.location))
             else:
-                lhs = cls(None, lhs, oper, location=SourceLocation.from_to(oper.location, lhs.location))
+                lhs = Operator(raw, None, lhs, oper, location=SourceLocation.from_to(oper.location, lhs.location))
+            raw = [lhs]
         elif (lhs := Atom.try_lex(stream)) is None:
             _LOG.warn("%sLeft-hand side was not an Atom", 'x ' * stream.depth)
-            return
+            return None
 
         while True:
             oper = stream.peek()
@@ -139,32 +156,50 @@ class Operator(Lex):
                 if l_bp < min_bp:
                     # print("oper not strong enough")
                     break
-                stream.pop()
+                raw.append(stream.pop())
                 match oper.type:
                     case TokenType.LParen:
                         from . import ExpList
                         rhs = None
                         if (tok := stream.peek()) is not None and tok.type != TokenType.RParen:
                             rhs = ExpList.try_lex(stream)
-                        end = stream.expect(TokenType.RParen)
-                        lhs = cls(lhs, rhs, oper, location=SourceLocation.from_to(lhs.location, end.location))
+                        raw.append(rhs)
+                        raw.append(stream.expect(TokenType.RParen))
+                        lhs = Operator(raw,
+                                       lhs,
+                                       rhs,
+                                       oper,
+                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [lhs]
                     case TokenType.LBracket:
                         rhs = None
                         if (tok := stream.peek()) is not None and tok.type != TokenType.RBracket:
-                            rhs = cls.try_lex(stream, 0)
-                        end = stream.expect(TokenType.RBracket)
-                        lhs = cls(lhs, rhs, oper, location=SourceLocation.from_to(lhs.location, end.location))
+                            rhs = Operator.try_lex(stream, 0)
+                        raw.append(rhs)
+                        raw.append(stream.expect(TokenType.RBracket))
+                        lhs = Operator(raw,
+                                       lhs,
+                                       rhs,
+                                       oper,
+                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [lhs]
                     case _:
-                        lhs = cls(lhs, None, oper, location=SourceLocation.from_to(lhs.location, oper.location))
+                        lhs = Operator(raw,
+                                       lhs,
+                                       None,
+                                       oper,
+                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [lhs]
                 continue
             l_bp, r_bp = INFIX_BINDING_POWER[oper.value]
             if l_bp < min_bp:
                 # print("oper not strong enough")
                 break
-            stream.pop()
-            if (rhs := cls.try_lex(stream, r_bp)) is None:
+            raw.append(stream.pop())
+            if (rhs := Operator.try_lex(stream, r_bp)) is None:
                 # print("rhs none")
                 break
-            lhs = cls(lhs, rhs, oper, location=SourceLocation.from_to(lhs.location, rhs.location))
-
+            raw.append(rhs)
+            lhs = Operator(raw, lhs, rhs, oper, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+            raw = [lhs]
         return lhs

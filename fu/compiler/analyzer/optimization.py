@@ -28,7 +28,8 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
             rhs = yield from _optimize(element.rhs)
             match lhs, element.oper.value, rhs:
                 case LexedLiteral(type=TokenType.Number), '+', LexedLiteral(type=TokenType.Number):
-                    ret = LexedLiteral(value=str(lhs.to_value() + rhs.to_value()),
+                    ret = LexedLiteral([],
+                                       value=str(lhs.to_value() + rhs.to_value()),
                                        type=TokenType.Number,
                                        location=element.location)
                     yield CompilerNotice('Debug',
@@ -36,7 +37,8 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
                                          location=element.location)
                     return ret
                 case LexedLiteral(type=TokenType.Number), '-', LexedLiteral(type=TokenType.Number):
-                    ret = LexedLiteral(value=str(lhs.to_value() - rhs.to_value()),
+                    ret = LexedLiteral([],
+                                       value=str(lhs.to_value() - rhs.to_value()),
                                        type=TokenType.Number,
                                        location=element.location)
                     yield CompilerNotice('Debug',
@@ -44,7 +46,8 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
                                          location=element.location)
                     return ret
                 case LexedLiteral(type=TokenType.Number), '*', LexedLiteral(type=TokenType.Number):
-                    ret = LexedLiteral(value=str(lhs.to_value() * rhs.to_value()),
+                    ret = LexedLiteral([],
+                                       value=str(lhs.to_value() * rhs.to_value()),
                                        type=TokenType.Number,
                                        location=element.location)
                     yield CompilerNotice('Debug',
@@ -52,7 +55,8 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
                                          location=element.location)
                     return ret
                 case LexedLiteral(type=TokenType.Number), '/', LexedLiteral(type=TokenType.Number):
-                    ret = LexedLiteral(value=str(lhs.to_value() / rhs.to_value()),
+                    ret = LexedLiteral([],
+                                       value=str(lhs.to_value() / rhs.to_value()),
                                        type=TokenType.Number,
                                        location=element.location)
                     yield CompilerNotice('Debug',
@@ -141,7 +145,7 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
             if different:
                 return replace(element, content=content)
         case LexedLiteral() | Operator(oper=Token(type=TokenType.Dot)) | Operator(oper=Token(
-            type=TokenType.Equals)) | Identifier():
+            type=TokenType.Equals)) | Identifier() | Namespace():
             """Ignore"""
         case _:
             yield CompilerNotice('Note', f"Don't know how to optimize `{type(element).__name__}`.", element.location)

@@ -12,7 +12,7 @@ from ._populate import _populate
 ALL_ELEMENTS: list[Lex] = []
 CHECKED_ELEMENTS: list[Lex] = []
 
-from .scope import AnalyzerScope, _PARSING_BUILTINS, GLOBAL_SCOPE
+from .scope import AnalyzerScope, _PARSING_BUILTINS
 from .static_variable_decl import StaticVariableDecl
 from .optimization import _optimize
 from .resolvers import *
@@ -37,7 +37,7 @@ def check_program(program: Iterable[Document]):
         # Populate static space.
         yield from _populate(document)
 
-    _LOG.debug(f'Population of static space complete: {GLOBAL_SCOPE.members.keys()}')
+    # _LOG.debug(f'Population of static space complete: {GLOBAL_SCOPE.members.keys()}')
 
     element_count = 0
     for document in program:
@@ -72,12 +72,12 @@ def check_program(program: Iterable[Document]):
     for document in program:
         yield from _check(document)
 
-    _LOG.debug(f"Checked elements: {len(CHECKED_ELEMENTS):,}")
+    # _LOG.debug(f"Checked elements: {len(CHECKED_ELEMENTS):,}")
 
-    unchecked_elements = [x for x in ALL_ELEMENTS if x not in CHECKED_ELEMENTS]
-    for elem in unchecked_elements:
-        if any(elem in x._s_expr()[1] for x in unchecked_elements):
-            continue
-        yield CompilerNotice('Info',
-                             f"Element `{type(elem).__name__}` was unchecked by static analysis.",
-                             location=elem.location)
+    # unchecked_elements = [x for x in ALL_ELEMENTS if x not in CHECKED_ELEMENTS]
+    # for elem in unchecked_elements:
+    #     if any(elem in x._s_expr()[1] for x in unchecked_elements):
+    #         continue
+    #     yield CompilerNotice('Info',
+    #                          f"Element `{type(elem).__name__}` was unchecked by static analysis.",
+    #                          location=elem.location)

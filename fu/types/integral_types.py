@@ -14,7 +14,7 @@ class IntegralType(TypeBase):
     callable: ClassVar[None] = None
 
     def could_hold_value(self, value: str) -> bool:
-        raise NotImplementedError()
+        return False
 
 
 VOID_TYPE = IntegralType('void', size=0)

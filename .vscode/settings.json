@@ -13,7 +13,9 @@
         "**/Thumbs.db": true,
         "**/__pycache__": true,
         "**/.mypy_cache": true,
-        "**/.pyvenv": true
+        "**/.pyvenv": true,
+        ".coverage": true,
+        "**/.pytest_cache": true
     },
     "mypy-type-checker.importStrategy": "fromEnvironment",
     "workbench.colorCustomizations": {
@@ -32,5 +34,10 @@
         "titleBar.border": "#20522a"
     },
     "peacock.color": "#20522a",
-    "pylint.importStrategy": "fromEnvironment"
+    "pylint.importStrategy": "fromEnvironment",
+    "python.testing.pytestArgs": [
+        "test"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

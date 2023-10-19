@@ -87,7 +87,8 @@ class Token:
             return self.type == value
         if isinstance(value, Token):
             return self.value == value.value and self.type == value.type and self.location == value.location
-        return super().__eq__(value)
+        return False
+        # return super().__eq__(value)
 
     @staticmethod
     def token_generator(stream: StrStream) -> Iterator['Token']:
@@ -114,8 +115,8 @@ class Token:
                         # else:
                         #     # print("newline, but last line wasn't blank")
                         #     last_blank = True
-                    else:
-                        print("not a newline")
+                    # else:
+                    #     print("not a newline")
                     # else:
                     #     whitespace_buffer += char
                     npos = stream.position

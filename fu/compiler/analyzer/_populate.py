@@ -22,10 +22,11 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
     # _LOG.debug(f"Populating static identifiers from {type(element).__name__} into {ScopeContext.current().fqdn}")
     match element:
         case Namespace():
-            scope = StaticScope.current()
+            scope = AnalyzerScope.current()
             with ExitStack() as ex:
-                for name in element.name:
-                    if name in scope.members and not isinstance(scope.members[name], StaticScope):
+                for ident in element.name:
+                    name = ident.value
+                    if name in scope.members and not isinstance(scope.members[name], AnalyzerScope):
                         extra = []
                         if isinstance(scope.members[name], StaticVariableDecl):
                             extra.append(CompilerNotice("Note", f"From here.", scope.members[name].location))
@@ -33,8 +34,8 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                              f"{name!r} already exists in {scope.fqdn}!",
                                              element.location,
                                              extra=extra)
-                    new_scope = ex.enter_context(StaticScope.enter(name, location=element.location))
-                    scope.members[name.value] = new_scope
+                    new_scope = ex.enter_context(AnalyzerScope.enter(name, location=element.location))
+                    scope.members[name] = new_scope
                     scope = new_scope
                 for decl in element.static_scope:
                     yield from _populate(decl)
@@ -150,7 +151,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 if not isinstance(content, (Declaration, TypeDeclaration)):
                     continue
                 yield from _populate(content)
-        case _:
+        case _:  # pragma: no cover
             yield CompilerNotice('Error', f"Static population for `{type(element).__name__}` is not implemented!",
                                  element.location)
     if False:

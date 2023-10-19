@@ -9,8 +9,8 @@ class Identifier(Lex):
     """Identifier: Word"""
     value: str
 
-    # def __str__(self) -> str:
-    #     return self.value
+    def __str__(self) -> str:
+        return self.value
 
     def to_code(self) -> Iterable[str]:
         yield self.value

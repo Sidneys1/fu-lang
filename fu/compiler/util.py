@@ -17,5 +17,5 @@ def set_contextvar(var: ContextVar[T], value: T) -> Iterator[T]:
         var.reset(reset)
 
 
-def is_sequence_of(s: Sequence[Any], _type: Type[T]) -> TypeGuard[Sequence[T]]:
+def is_sequence_of(s: Sequence[Any], _type: Type[T]) -> TypeGuard[Sequence[T]]:  # pragma: no cover
     return all(isinstance(x, _type) for x in s)

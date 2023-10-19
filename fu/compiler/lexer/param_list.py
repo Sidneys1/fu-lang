@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Iterable, Union
 
 from .. import SourceLocation, TokenStream
-from ..tokenizer import TokenType
+from ..tokenizer import TokenType, Token
 
 from . import Lex, LexError
 
@@ -14,6 +14,17 @@ if TYPE_CHECKING:
 class ParamList(Lex):
     """ParamList: '(' Identity [',' Identity[...]] ')';"""
     params: list[Union['Identity', 'Type_']]
+
+    def to_code(self) -> Iterable[str]:
+        for x in self.raw:
+            if isinstance(x, Lex):
+                yield from x.to_code()
+            elif x.type == TokenType.BlankLine:
+                pass
+            else:
+                yield x.value
+                if x.type == TokenType.Comma:
+                    yield ' '
 
     def __str__(self) -> str:
         inner = ', '.join(str(x) for x in self.params)
@@ -29,20 +40,21 @@ class ParamList(Lex):
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         from . import Identity, Type_
-        start = stream.expect(TokenType.LParen, quiet=True).location
+        raw: list[Lex | Token] = [stream.expect(TokenType.LParen, quiet=True)]
 
         if (tok := stream.peek()) is not None and tok.type == TokenType.RParen:
-            end = stream.expect(TokenType.RParen).location
-            return cls([], location=SourceLocation.from_to(start, end))
+            raw.append(stream.expect(TokenType.RParen))
+            return ParamList(raw, [], location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
         params: list[Identity | Type_] = []
         while True:
             v: Identity | Type_ | None
             if (v := Identity.try_lex(stream)) is None and (v := Type_.try_lex(stream)) is None:
                 raise LexError("Exected `Identity` or `Type_`!")
+            raw.append(v)
             params.append(v)
             if (tok := stream.peek()) is not None and tok.type != TokenType.Comma:
                 break
-            stream.pop()
-        end = stream.expect(TokenType.RParen).location
-        return cls(params, location=SourceLocation.from_to(start, end))
+            raw.append(stream.pop())
+        raw.append(stream.expect(TokenType.RParen))
+        return ParamList(raw, params, location=SourceLocation.from_to(raw[0].location, raw[-1].location))

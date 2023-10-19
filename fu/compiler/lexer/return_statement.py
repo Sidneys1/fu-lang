@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Iterable, Optional
 
 from .. import SourceLocation, TokenStream
-from ..tokenizer import TokenType
+from ..tokenizer import TokenType, Token
 
 from . import Lex, _tab, Expression
 
@@ -12,21 +12,23 @@ class ReturnStatement(Lex):
     """ReturnStatement: 'return' Expression;"""
     value: Optional['Expression']
 
-    def __str__(self) -> str:
-        if self.value is None:
-            return f"{_tab()}return;\n"
-        return f"{_tab()}return {self.value};\n"
+    def to_code(self) -> Iterable[str]:
+        yield _tab() + 'return'
+        if self.value is not None:
+            yield ' '
+            yield from self.value.to_code()
+        yield ';'
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
         return "return", [] if self.value is None else [self.value]
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        start = stream.expect(TokenType.ReturnKeyword, quiet=True).location
+        raw: list[Lex | Token] = [stream.expect(TokenType.ReturnKeyword, quiet=True)]
         value = None
         try:
-            value = Expression.try_lex(stream)
+            raw.append(value := Expression.try_lex(stream))
         except Exception as ex:
             pass
-        end = stream.expect(TokenType.Semicolon).location
-        return cls(value, location=SourceLocation.from_to(start, end))
+        raw.append(stream.expect(TokenType.Semicolon))
+        return ReturnStatement(raw, value, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
