@@ -1,17 +1,14 @@
-from dataclasses import dataclass, InitVar, field
+from dataclasses import InitVar, dataclass, field
 from enum import Enum, auto
-from io import BytesIO
-from typing import Iterator, TYPE_CHECKING, Optional
-from logging import getLogger
 from functools import partial
-
-from fu.virtual_machine.bytecode.structures.binary import BytesIO
+from io import BytesIO
+from logging import getLogger
+from typing import TYPE_CHECKING, Iterator, Optional
 
 from ....types import TypeBase
-
-from .. import _encode_u32, int_u32, int_u16, _encode_u16, _encode_numeric, _decode_u32
-
+from .. import _decode_u32, _encode_numeric, _encode_u16, _encode_u32, int_u16, int_u32
 from . import BytecodeBase, BytecodeTypes
+from fu.virtual_machine.bytecode.structures.binary import BytesIO
 
 if TYPE_CHECKING:
     from ..builder import BytecodeBuilder

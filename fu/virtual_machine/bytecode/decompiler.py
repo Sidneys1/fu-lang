@@ -1,4 +1,4 @@
-from io import BytesIO, SEEK_SET
+from io import SEEK_SET, BytesIO
 from typing import Iterator
 
 from . import OpcodeEnum, _decode_u32

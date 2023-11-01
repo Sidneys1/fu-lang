@@ -1,10 +1,9 @@
-from typing import TypeVar, Any
-from dataclasses import dataclass, field
 from collections import namedtuple
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
-from ..types.integral_types import IntType, FloatType
-
-from .bytecode import OpcodeEnum, getLogger, ParamType, NumericTypes
+from ..types.integral_types import FloatType, IntType
+from .bytecode import NumericTypes, OpcodeEnum, ParamType, getLogger
 from .bytecode.structures import BytecodeBinary
 
 _LOG = getLogger(__name__)

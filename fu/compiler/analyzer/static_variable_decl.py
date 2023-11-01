@@ -3,9 +3,8 @@ from typing import Self
 
 # from .static_type import StaticType
 from ...types import TypeBase
-
-from .. import SourceLocation, CompilerNotice
-from ..lexer import Lex, Operator, Identifier, Declaration, TypeDeclaration
+from .. import CompilerNotice, SourceLocation
+from ..lexer import Declaration, Identifier, Identity, Lex, Operator, Type_, TypeDeclaration
 from ..tokenizer import Token, TokenType
 
 
@@ -13,7 +12,7 @@ from ..tokenizer import Token, TokenType
 class StaticVariableDecl:
     """Describes the declaration of a variable during static analysis."""
     type: TypeBase
-    lex: Declaration | TypeDeclaration
+    lex: Declaration | Identity | TypeDeclaration
     parent: Self | None = field(default=None, kw_only=True)
     member_decls: dict[str, Self] = field(default_factory=dict, kw_only=True)
 
@@ -29,7 +28,12 @@ class StaticVariableDecl:
     @property
     def name(self) -> str:
         if isinstance(self.lex, TypeDeclaration):
-            return f"{self.lex.name.value}:"
+            return f"{self.lex.name.value}: {self.lex.type}"
+        if isinstance(self.lex, Identity):
+            return f"{self.lex.lhs.value}: {self.type.name}"
+        if isinstance(self.lex, Identifier):
+            return f"{self.lex.value}: {self.type.name}"
+        assert isinstance(self.lex, Declaration), f"Expected Declaration, got `{type(self.lex).__name__}`"
         return f"{self.lex.identity.lhs}: {self.type.name}"
 
     def as_const(self) -> Self:
@@ -52,9 +56,15 @@ class OverloadedMethodDecl(StaticVariableDecl):
     #             return overload
 
 
-def _decl_of(element: Lex) -> StaticVariableDecl:
+def decl_of(element: Lex) -> StaticVariableDecl:
     from .scope import AnalyzerScope
     match element:
+        case Type_():
+            scope = AnalyzerScope.current()
+            base_decl = scope.in_scope(element.ident.value)
+            assert isinstance(
+                base_decl, StaticVariableDecl), f"`{element.ident.value}` in {scope.fqdn} a {type(base_decl).__name__}"
+            return base_decl
         case Operator(oper=Token(type=TokenType.Dot), lhs=None):
             this_decl = AnalyzerScope.current().in_scope('this')
             assert isinstance(element.rhs, Identifier)

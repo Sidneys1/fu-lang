@@ -1,18 +1,17 @@
 from dataclasses import dataclass, field
-from io import BytesIO
-from typing import ClassVar, Iterator, TYPE_CHECKING
-from logging import getLogger
 from enum import IntFlag, auto
+from io import BytesIO
+from logging import getLogger
+from typing import TYPE_CHECKING, ClassVar, Iterator
 
 from ....compiler import SourceLocation
-
 from . import BytecodeBase, BytecodeTypes
 
 if TYPE_CHECKING:
     from .code import BytecodeFunction
     from .types import BytecodeType
 
-from .. import _encode_numeric, _encode_u32, int_u32, int_u16
+from .. import _encode_numeric, _encode_u32, int_u16, int_u32
 
 _LOG = getLogger(__package__)
 

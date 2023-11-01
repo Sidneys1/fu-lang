@@ -1,9 +1,9 @@
 import struct
 from enum import Enum, auto
 from functools import partial
-from logging import getLogger
 from io import BytesIO
-from typing import Callable, TypeAlias, Iterator, NewType, TypeVar, Any, Optional
+from logging import getLogger
+from typing import Any, Callable, Iterator, NewType, Optional, TypeAlias, TypeVar
 
 from ...types.integral_types import *
 

@@ -1,13 +1,10 @@
-from typing import Callable, TYPE_CHECKING
-
-from ..lexer.lexed_literal import LexedLiteral
+from typing import TYPE_CHECKING, Callable
 
 from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, FloatType, IntType, TypeBase
 from ...types.integral_types import IntegralType
-
 from .. import CompilerNotice
-from ..lexer import (ExpList, Identifier, Lex, ReturnStatement, StaticScope, Token, TokenType, Type_, Operator)
-
+from ..lexer import ExpList, Identifier, Lex, Operator, ReturnStatement, StaticScope, Token, TokenType, Type_
+from ..lexer.lexed_literal import LexedLiteral
 from . import _LOG
 from .scope import AnalyzerScope
 from .static_variable_decl import OverloadedMethodDecl, StaticVariableDecl
@@ -47,13 +44,15 @@ def resolve_type(element: Lex,
             if isinstance(lhs_type, StaticVariableDecl):
                 lhs_decl = lhs_type
                 lhs_type = lhs_type.type
-            assert isinstance(element.rhs, Identifier)
-            # input(f"OP DOT against lhs members: \n\n{lhs_decl}")
+            assert isinstance(
+                element.rhs,
+                Identifier), f"Expected Identifier on rhs of {element!r}, got `{type(element.rhs).__name__}`"
             ret = lhs_type.members.get(element.rhs.value, None)
             if ret is None:
                 raise CompilerNotice('Error',
                                      f"{lhs_type.type.name} has no member {element.rhs.value}.",
                                      location=element.location)
+            # input(f"OP DOT against lhs members: \n\n{lhs_decl.type.name}.{element.rhs.value}\n->\n{ret.name}")
             return ret
         case Operator(oper=Token(type=TokenType.Dot)):
             lhs_type = resolve_type(element.lhs)
@@ -77,7 +76,10 @@ def resolve_type(element: Lex,
                 raise CompilerNotice('Error', f"{lhs_type.name} is not array indexable.", location=element.lhs.location)
             return lhs_type.indexable[1]
         case Operator(oper=Token(type=TokenType.LParen)):
-            lhs_type = resolve_type(element.lhs).type
+            lhs_type = resolve_type(element.lhs)
+            if isinstance(lhs_type, StaticVariableDecl):
+                lhs_decl = lhs_type
+                lhs_type = lhs_type.type
             if isinstance(lhs_type, OverloadedMethodDecl):
                 if element.rhs is None:
                     rhs_params = tuple()
@@ -86,6 +88,7 @@ def resolve_type(element: Lex,
                     rhs_params = tuple(resolve_type(v) for v in element.rhs.values)
                 return lhs_type.match(rhs_params).type.return_type
             if lhs_type.callable:
+                # input(f"`{element}` returns `{lhs_type.callable[1].name}`")
                 return lhs_type.callable[1]
             raise CompilerNotice('Error', f"{lhs_type.name} is not callable.", location=element.lhs.location)
         case Operator(oper=Token(type=TokenType.Operator), lhs=None):  # prefix operator
@@ -156,10 +159,6 @@ def resolve_type(element: Lex,
                 raise CompilerNotice('Error',
                                      f"Identifier `{element.value}` is not defined.",
                                      location=element.location)
-            if isinstance(ret, StaticScope):
-                return ret
-            # if isinstance(ret, OverloadedMethodDecl):
-            #     return ret
             return ret
         case Operator():
             raise CompilerNotice('Note', f"Type resolution for Operator `{element.oper}` is not implemented!",

@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Union
 
-from .. import TokenStream, SourceLocation
-from ..tokenizer import TokenType, Token
-
-from . import Lex, Identifier, LexedLiteral, LexError
+from .. import SourceLocation, TokenStream
+from ..tokenizer import Token, TokenType
+from . import Identifier, Lex, LexedLiteral, LexError
 
 if TYPE_CHECKING:
     from . import Expression

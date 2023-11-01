@@ -1,10 +1,12 @@
-from io import TextIOBase
 from contextlib import contextmanager
-from typing import TypeVar, Generic, Any, Iterator
+from io import TextIOBase
 from logging import getLogger
+from typing import Any, Generic, Iterator, TypeVar
 
-from . import StrStream as _StrStream, Stream as _Stream, TokenStream as _TokenStream
-from .tokenizer import TokenType, Token
+from . import Stream as _Stream
+from . import StrStream as _StrStream
+from . import TokenStream as _TokenStream
+from .tokenizer import Token, TokenType
 
 
 class StrStream(_StrStream):

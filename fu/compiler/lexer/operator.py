@@ -1,14 +1,14 @@
-from typing import Iterable, Optional, Union, Self, TYPE_CHECKING
-from dataclasses import replace, dataclass
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Iterable, Optional, Self, Union
 
-from . import _LOG, Lex, LexWarning, TokenStream, ImmutableTokenStream
 from ..stream import QuietStreamExpectError
 from ..tokenizer import SourceLocation, Token, TokenType
+from . import _LOG, ImmutableTokenStream, Lex, LexWarning, TokenStream
 
 if TYPE_CHECKING:
-    from . import ExpList, Identifier, Atom
+    from . import Atom, ExpList, Identifier
 
-PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10), '!': (None, 10), '.': (None, 10)}
+PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10), '!': (None, 10), '.': (None, 14)}
 INFIX_BINDING_POWER: dict[str, tuple[int, int]] = {
     ',': (1, 2),
     '=': (3, 4),
@@ -84,6 +84,23 @@ class Operator(Lex):
             yield from self.lhs.to_code()
             yield f' {self.oper.value} '
             yield from self.rhs.to_code()
+
+    def __str__(self) -> str:
+        match self.lhs, self.oper.type, self.rhs:
+            case None, TokenType.Dot, _:
+                return f"<this>.{self.rhs}"
+            case _, TokenType.Dot, _:
+                return f"{self.lhs}.{self.rhs}"
+            case _, TokenType.LParen, _:
+                return f"{self.lhs}({self.rhs})"
+            case _, TokenType.LBracket, _:
+                return f"{self.lhs}[{self.rhs}]"
+            case None, _, _:
+                return f"{self.oper.value}{self.rhs}"
+            case _, _, None:
+                return f"{self.lhs}{self.oper.value}"
+            case _, _, _:
+                return f"{self.lhs} {self.oper.value} {self.rhs}"
 
     def __repr__(self) -> str:
         match self.oper.type:

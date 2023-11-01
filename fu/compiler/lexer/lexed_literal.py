@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Iterable
 
-from . import Lex
 from ..tokenizer import TokenType
+from . import Lex
 
 
 @dataclass(repr=False, slots=True, frozen=True)

@@ -1,11 +1,10 @@
-from io import BytesIO, SEEK_END
+from io import SEEK_END, BytesIO
 from typing import TYPE_CHECKING
 
 from ...compiler import SourceLocation
-from ...types import TypeBase, VOID_TYPE
-
-from . import _to_bytecode_numeric, _encode_numeric, _encode_u32, int_u16, int_u32
-from .structures import BytecodeType, BuiltinTypes, BytecodeBinary, BytecodeFunction
+from ...types import VOID_TYPE, TypeBase
+from . import _encode_numeric, _encode_u32, _to_bytecode_numeric, int_u16, int_u32
+from .structures import BuiltinTypes, BytecodeBinary, BytecodeFunction, BytecodeType
 
 
 class BytecodeBuilder:

@@ -1,11 +1,10 @@
 from dataclasses import dataclass
+from enum import Enum
 from logging import getLogger
 from typing import Iterator
-from enum import Enum
 
-from .. import _encode_u32, _encode_u16, int_u32, int_u16
-
-from . import BytecodeTypes, BytecodeBase
+from .. import _encode_u16, _encode_u32, int_u16, int_u32
+from . import BytecodeBase, BytecodeTypes
 from .binary import BytecodeBase, BytecodeTypes, Iterator
 
 _LOG = getLogger(__package__)

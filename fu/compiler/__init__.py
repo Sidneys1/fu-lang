@@ -1,7 +1,9 @@
-from typing import Protocol, ContextManager, Generic, TypeVar, TypeAlias, Self, TYPE_CHECKING
-from dataclasses import dataclass, field
+import inspect
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from logging import getLogger
+from typing import TYPE_CHECKING, ContextManager, Generic, Protocol, Self, TypeAlias, TypeVar
+from enum import StrEnum
 
 if TYPE_CHECKING:  # pragma: no cover
     from .tokenizer import Token, TokenType
@@ -31,18 +33,35 @@ class SourceLocation:
 
 
 class CompilerNotice(Exception):
-    level: str
+    """Compiler notices (errors, debug info, etc.)."""
+
+    class Level(StrEnum):
+        """Notice levels."""
+        Info = 'info'
+        Warning = 'warning'
+        Error = 'error'
+        Note = 'note'
+        Debug = 'debug'
+        Critical = 'critical'
+
+        Warn = Warning
+
+    level: Level
     message: str
     location: SourceLocation | None
     extra: list[Self]
+    _source: inspect.FrameInfo
 
-    def __init__(self, level: str, message: str, location: SourceLocation, extra: list[Self] | None = None):
+    def __init__(self, level: str | Level, message: str, location: SourceLocation, extra: list[Self] | None = None):
+        if isinstance(level, str):
+            level = CompilerNotice.Level[level]
         self.level = level
         self.message = message
         self.location = location
         if extra is None:
             extra = []
         self.extra = extra
+        self._source = inspect.stack()[1:-5]
 
 
 T = TypeVar('T', covariant=True)

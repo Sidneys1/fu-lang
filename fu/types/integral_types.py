@@ -1,5 +1,5 @@
-from typing import ClassVar, Self
 from dataclasses import dataclass, field
+from typing import ClassVar, Self
 
 from . import TypeBase
 
@@ -16,8 +16,6 @@ class IntegralType(TypeBase):
     def could_hold_value(self, value: str) -> bool:
         return False
 
-
-VOID_TYPE = IntegralType('void', size=0)
 
 #
 # ================  INT TYPES  ================
@@ -110,6 +108,7 @@ class EnumType(IntType):
     inherits: tuple[IntType] = field(default=())
 
     def __post_init__(self):
+        TypeBase.__post_init__(self)
         if self.inherits == ():
             min_val = min(self.values.values())
             max_val = max(self.values.values())

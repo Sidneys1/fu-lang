@@ -1,13 +1,15 @@
+# isort: skip_file
+
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Optional, Union, Self, TypeAlias
-from logging import getLogger
-from contextvars import ContextVar
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from logging import getLogger
+from typing import Any, Iterable, Optional, Self, TypeAlias, Union
 
 from .. import CompilerNotice, ImmutableTokenStream, TokenStream
-from ..tokenizer import TokenType, Token, SourceLocation, SpecialOperatorType, NON_CODE_TOKEN_TYPES
-from ..stream import StreamExpectError, QuietStreamExpectError
+from ..stream import QuietStreamExpectError, StreamExpectError
+from ..tokenizer import NON_CODE_TOKEN_TYPES, SourceLocation, SpecialOperatorType, Token, TokenType
 
 _LOG = getLogger(__name__)
 
@@ -155,9 +157,12 @@ class ExpList(Lex):
             if i != 0:
                 yield ', '
 
+    def __str__(self) -> str:
+        return ', '.join(str(x) for x in self.values)
+
     def __repr__(self) -> str:
         inner = ', '.join(repr(x) for x in self.values)
-        return f"CallList<{inner}>"
+        return f"ExpList<{inner}>"
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
         return 'params', self.values

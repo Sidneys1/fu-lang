@@ -1,5 +1,4 @@
-from ...integral_types import USIZE_TYPE, SIZE_TYPE
-
+from ...integral_types import SIZE_TYPE, USIZE_TYPE
 from . import GenericType
 
 ARRAY_GENERIC_PARAM = GenericType.GenericParam('T')

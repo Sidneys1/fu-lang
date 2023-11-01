@@ -2,9 +2,8 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from .. import SourceLocation, TokenStream
-from ..tokenizer import TokenType, Token
-
-from . import Lex, _tab, Expression
+from ..tokenizer import Token, TokenType
+from . import Expression, Lex, _tab
 
 
 @dataclass(repr=False, slots=True, frozen=True)

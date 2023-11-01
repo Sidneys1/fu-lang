@@ -2,211 +2,44 @@ from contextlib import ExitStack
 from typing import Iterator
 
 from ....types import *
-
 from ... import CompilerNotice
 from ...lexer import *
-
-from .. import _mark_checked_recursive, CHECKED_ELEMENTS
-from .._populate import _populate
+from .. import CHECKED_ELEMENTS, _mark_checked_recursive
+from ..resolvers import resolve_owning_type, resolve_type
 from ..scope import AnalyzerScope
 from ..static_variable_decl import OverloadedMethodDecl, StaticVariableDecl
-from ..static_type import type_from_lex
-from ..resolvers import resolve_type, resolve_owning_type
+from ._check_conversion import _check_conversion
+from ._check_declaration import _check_declaration
+from ._check_interface_declaration import _check_interface_declaration
+from ._check_type_alias import _check_type_alias
+from ._check_type_declaration import check_type_declaration
 
-from ._assigns_to import _assigns_to
-
-
-def _check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice]:
-    assert element.type == 'type'
-    scope = AnalyzerScope.current()
-    _mark_checked_recursive(element.name)
-
-    if element.definition is None:
-        return
-
-    if isinstance(element.definition, Type_):
-        _mark_checked_recursive(element.definition)
-        return
-
-    unassigned: list[StaticVariableDecl] = []
-    ctor: Declaration | None = None
-    this_decl = scope.members['this']
-    for elem in element.definition:
-        match elem:
-            case TypeDeclaration():
-                yield from _check_type_declaration(elem)
-                continue
-            case Declaration(identity=SpecialOperatorIdentity(lhs=SpecialOperatorType.Constructor)):
-                ctor = elem
-                continue
-            case Declaration(identity=Identity()) if elem.initial is None:
-                assert isinstance(elem.identity, Identity)
-                # input(this_decl)
-                unassigned.append(this_decl.member_decls[elem.identity.lhs.value])
-        yield from _check(elem)
-
-    if ctor is None:
-        if unassigned:
-            inner = '`, `'.join(x.lex.identity.lhs.value for x in unassigned)
-            yield CompilerNotice(
-                'Warning', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
-                element.location)
-        return
-
-    assert ctor.initial is not None and isinstance(ctor.initial, Scope)
-    params = ctor.identity.rhs.mods[-1]
-    assert isinstance(params, ParamList)
-
-    props = {
-        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
-        for p in params.params if isinstance(p, Identity) or (isinstance(p, Type_) and p.ident.value != 'this')
-    }
-    # input(f"Constructor props: {params.params} -> {props.keys()}")
-    this_type = this_decl.type
-    if isinstance(this_type, TypeType):
-        this_type = this_type.underlying
-    assert isinstance(this_type, TypeBase), f"`this` was unexpectedtly a `{type(this_type).__name__}`."
-    props['this'] = StaticVariableDecl(this_type, element, member_decls=this_decl.member_decls)
-    assert isinstance(ctor.initial, Scope)
-    with AnalyzerScope.new(ctor.identity.lhs.value, vars=props):
-        CHECKED_ELEMENTS.append(ctor)
-        # yield from _check(ctor.initial)
-        CHECKED_ELEMENTS.append(ctor.initial)
-        # TODO: check that all params are being used
-        _mark_checked_recursive(ctor.identity)
-        for x in ctor.initial.content:
-            match x:
-                case ReturnStatement() if x.value is not None:
-                    yield CompilerNotice('Error', "Returning values not allowed in a constructor!", x.location)
-                case Declaration():
-                    yield from _check(x)
-                case _:
-                    yield from _check(x)
-                    # try:
-                    for assigns_to in _assigns_to(x):
-                        if assigns_to in unassigned:
-                            unassigned.remove(assigns_to)
-                    # except CompilerNotice as ex:
-                    #     yield ex
-        # _mark_checked_recursive(ctor)
-    if unassigned:
-        inner = '`, `'.join(x.lex.identity.lhs.value for x in unassigned)
-        yield CompilerNotice(
-            'Warning', f"Type `{scope.fqdn}` has uninitialized members: `{inner}`. Consider adding a constructor?",
-            element.location)
+_LOG = getLogger(__package__)
 
 
-def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
-    scope = AnalyzerScope.current()
-    # Check shadowing
-    if scope.parent is not None and (outer_decl := scope.parent.in_scope(element.identity.lhs.value)) is not None:
-        yield CompilerNotice('Warning',
-                             f"Declaration of {element.identity.lhs.value!r} shadows previous declaration.",
-                             location=element.identity.lhs.location,
-                             extra=[CompilerNotice('Note', "Here.", location=outer_decl.location)])
-    # Check redefinition
-    if (inner_decl := scope.members.get(element.identity.lhs.value, None)) is not None:
-        # TODO: overloaded methods
-        # if isinstance(inner_decl, OverloadedMethodDecl):
-        #     ...
-        # el
-        if inner_decl.location is not element.identity.location:
-            # input(f'{type(inner_decl).__name__}')
-            yield CompilerNotice('Error',
-                                 f"Redefinition of {element.identity.lhs.value!r}.",
-                                 location=element.identity.lhs.location,
-                                 extra=[CompilerNotice('Note', "Here.", location=inner_decl.location)])
+def _expand_inherits(type_: TypeBase) -> Iterator[TypeBase]:
+    to_expand = [type_]
+    already_expanded = []
+    # print(f"Expanding inheritance of {type_.name}:")
+    while to_expand:
+        type_ = to_expand.pop()
+        if isinstance(type_, ThisType):
+            type_ = type_.resolved
+        if isinstance(type_, TypeType):
+            raise NotImplementedError(type_.name)
+        if type_ in already_expanded:
+            continue
+        yield type_
+        already_expanded.append(type_)
+        if type_.inherits:
+            for x in type_.inherits:
+                # print(f"\t{type_.name} inherits {x.name}")
+                to_expand.append(x)
 
-    _mark_checked_recursive(element.identity)
-
-    if element.initial is not None:
-        try:
-            lhs_type = type_from_lex(element.identity.rhs, scope)
-        except CompilerNotice as ex:
-            yield ex
-            return
-        if not isinstance(element.initial, Scope):
-            yield from _check(element.initial)
-            return
-
-        if lhs_type.callable is None:
-            raise CompilerNotice(
-                "Error",
-                f"`{element.identity}` is not callable but is initialized with a body.",
-                element.identity.location)
-        elif not element.initial.content:
-            yield CompilerNotice('Warning', "Method initialized with an empty body.", element.initial.location)
-
-        params = element.identity.rhs.mods[-1]
-        assert isinstance(params, ParamList)
-        props = {
-            p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
-            for p in params.params
-        }
-
-        with AnalyzerScope.new(element.identity.lhs.value,
-                               vars=props,
-                               return_type=StaticVariableDecl(lhs_type.callable[1], element)):
-            try:
-                yield from _populate(element.initial)
-                # TODO type check return
-                yield from _check(element.initial)
-            except CompilerNotice as ex:
-                yield ex
-
-
-def _check_conversion(from_: TypeBase | StaticVariableDecl, to_: TypeBase | StaticVariableDecl,
-                      location: SourceLocation):
-    """
-    Check implicit conversion compatiblity in converting `from_` to `to_`.
-    
-    Reaises a `CompilerNotice` if there are warnings (e.g., narrowing) or errors (conversion not allowed).
-    """
-
-    from_decl = None
-    if isinstance(from_, StaticVariableDecl):
-        from_decl = from_
-        from_ = from_.type
-    to_decl = None
-    if isinstance(to_, StaticVariableDecl):
-        to_decl = to_
-        to_ = to_.type
-
-    if from_ == to_:
-        return
-
-    if VOID_TYPE in (from_, to_):
-        raise CompilerNotice('Error', "There are no conversions to or from void.", location=location)
-
-    if from_ == BOOL_TYPE or to_ == BOOL_TYPE:
-        raise NotImplementedError('Implicit bool conversions are not yet checked.')
-    if isinstance(from_, EnumType) or isinstance(to_, EnumType):
-        raise CompilerNotice('Error', "There are no implicit conversions of Enums.", location=location)
-
-    match from_, to_:
-    # case (TypeBase(size=None), _) | (_, TypeBase(size=None)):
-    #     raise NotImplementedError(f"Can't compare types with unknown sizes ({from_.name} and/or {to_.name})...")
-        case IntType(), IntType() if from_.size is not None and to_.size is not None:
-            from_min, from_max = from_.range()
-            to_min, to_max = to_.range()
-            if (from_min < to_min) or (from_max > to_max):
-                raise CompilerNotice(
-                    'Warning',
-                    f"Narrowing when implicitly converting from a `{from_.name}` ({from_.size*8}bit {'' if from_.signed else 'un'}signed) to a `{to_.name}` ({to_.size*8}bit {'' if to_.signed else 'un'}signed).",
-                    location=location)
-        case FloatType(), IntType():
-            raise CompilerNotice('Warning',
-                                 f"Loss of precision converting from a `{from_.name}` to a `{to_.name}`.",
-                                 location=location)
-        case FloatType(), FloatType():
-            if to_.exp_bits < from_.exp_bits:
-                raise CompilerNotice(
-                    'Warning',
-                    f"Loss of floating point precision converting from a `{from_.name}` to a `{to_.name}`.",
-                    location=location)
-        case _, _:
-            raise NotImplementedError(
-                f"Implicit conversion check of `{from_.name}` to `{to_.name}` is not implemented.")
+            # raise CompilerNotice(
+            #     'Critical',
+            #     f"Don't know how to check the intersection of `{','.join(x.name for x in lhs_inherits)}` and `{','.join(x.name for x in rhs_inherits)} ({','.join(x.name for x in common)}??)`",
+            #     location)
 
 
 def _check_infix_operator(element: Operator) -> Iterator[CompilerNotice]:
@@ -230,20 +63,58 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
     match element:
         case Identifier():
             return
-        case Declaration(identity=Identity()):
+        case Declaration():
             yield from _check_declaration(element)
-        case TypeDeclaration(type='type'):
+        case TypeDeclaration(type='type', definition=list()):
             try:
-                # vars = {'this': scope.members[element.name.value]}
-                # if element.generic_params is not None:
-                #     for x in element.generic_params.params or ():
-                #         vars[x.value] = StaticVariableDecl(GenericType.GenericParam(x.value), x)
+                if element.name.value not in scope.scopes:
+                    existing = scope.in_scope(element.name.value)
+                    if isinstance(existing, StaticVariableDecl):
+                        # maybe an alias?
+                        if not existing.type.is_builtin:
+                            yield CompilerNotice('Debug', f"Checking a type alias is not implemented yet...",
+                                                 element.location)
+                        return
+                    raise NotImplementedError()
+
                 with AnalyzerScope.enter(element.name.value):
-                    yield from _check_type_declaration(element)
+                    # Enter type scope and check.
+                    yield from check_type_declaration(element)  #, decl=scope.members.get(element.name.value, None))
             except CompilerNotice as ex:
                 yield ex
             # except Exception as ex:
             #     yield CompilerNotice('Critical', f"Unknown error when checking {element!r}: {ex}", element.location)
+        case TypeDeclaration(type='type', definition=None):
+            # An builtin or an error
+            name = element.name.value
+            decl = scope.in_scope(name)
+            if decl is None or not isinstance(decl, StaticVariableDecl) or not decl.type.is_builtin:
+                fqdn = scope.fqdn
+                fqdn = (f"{fqdn}.{name}") if fqdn else name
+                raise CompilerNotice('Error', f"Type declaration or alias `{fqdn}` is incomplete.", element.location)
+        case TypeDeclaration(type='type', definition=Type_()):
+            yield from _check_type_alias(element)
+        case TypeDeclaration(type='interface', definition=list()):
+            try:
+                if element.name.value not in scope.scopes:
+                    existing = scope.in_scope(element.name.value)
+                    if isinstance(existing, StaticVariableDecl):
+                        # maybe an alias?
+                        if not existing.type.is_builtin:
+                            yield CompilerNotice('Debug', f"Checking a type alias is not implemented yet...",
+                                                 element.location)
+                        return
+                    raise NotImplementedError()
+
+                with AnalyzerScope.enter(element.name.value):
+                    yield from _check_interface_declaration(element)
+            except CompilerNotice as ex:
+                yield ex
+        case TypeDeclaration():
+            yield CompilerNotice(
+                'Note', "Checks for type declarations of form `xxx: "
+                f"{element.type}: <{type(element.definition).__name__}>` are not implemented!", element.location)
+            return
         case ReturnStatement():
             if element.value is None:
                 if scope.return_type.type != VOID_TYPE:
@@ -254,21 +125,21 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             yield from _check(element.value)
             try:
                 returned_type = resolve_type(element.value, want=scope.return_type.type)
-                assert not isinstance(returned_type, StaticScope)
-                try:
-                    _check_conversion(returned_type, scope.return_type.type,
-                                      element.value.location if element.value is not None else element.location)
-                except CompilerNotice as ex:
-                    yield ex
-                    return
+            except CompilerNotice as ex:
+                yield ex
+                return
+            assert not isinstance(returned_type, StaticScope)
+            allowed = yield from _check_conversion(
+                returned_type, scope.return_type.type,
+                element.value.location if element.value is not None else element.location)
+            if not allowed:
+                return
                 # # TODO: further checks?
                 # yield CompilerNotice(
                 #     'Error',
                 #     f"Return evaluates to a `{returned_type.name}`, but method is defined as returning `{scope.return_type.type.name}`.",
                 #     location=element.location,
                 #     extra=[CompilerNotice('Note', 'Return type defined here.', location=scope.return_type.location)])
-            except CompilerNotice as ex:
-                yield ex
         # case Operator(oper=Token(type=TokenType.Equals)):
         #     raise NotImplementedError()
         case Operator(oper=Token(type=TokenType.LBracket)):
@@ -280,13 +151,28 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             if not lhs_type.indexable:
                 yield CompilerNotice('Error', f"`{lhs_type.name}` is not array indexable.", location=element.location)
                 return
-            rhs_type = resolve_type(element.rhs)
+            # input(f"[{type(element.rhs).__name__}]")
             lhs_expected = lhs_type.indexable[0]
-            try:
-                _check_conversion
-            except CompilerNotice as ex:
-                yield ex
+            if isinstance(lhs_expected[0], ThisType):
+                lhs_expected = lhs_expected[1:]  # drop 'this'
+            # input(f"lhs expected: `{'`,`'.join(x.name for x in lhs_expected)}`")
+            match element.rhs:
+                case Identifier():
+                    rhs_pack = (resolve_type(element.rhs), )
+                case LexedLiteral():
+                    rhs_pack = (resolve_type(element.rhs, lhs_expected[0]), )
+                case _:
+                    raise NotImplementedError(f"Got {type(element.rhs).__name__}")
+            # input(f"rhs got: `{'`,`'.join(x.name for x in rhs_pack)}`")
+            if len(lhs_expected) != len(rhs_pack):
+                yield CompilerNotice(
+                    'Error',
+                    f"Parameter mismatch ({','.join(x.name for x in lhs_expected)}/{','.join(x.name for x in rhs_pack)})",
+                    element.rhs.location)
                 return
+
+            for l, r in zip(lhs_expected, rhs_pack):
+                yield from _check_conversion(r, l, element.rhs.location)
             # if rhs_type != lhs_expected:
             #     names = ', '.join(x.name for x in lhs_expected)
             #     yield CompilerNotice('Error',
@@ -366,6 +252,8 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             if isinstance(type_of_lhs, StaticVariableDecl):
                 decl_lhs = type_of_lhs
                 type_of_lhs = type_of_lhs.type
+                # input(f"type of {element.lhs} is {type(type_of_lhs).__name__}:{type_of_lhs.name}")
+
             assert not isinstance(type_of_lhs, StaticScope)
 
             # input(f"Calling {type_of_lhs}")
@@ -386,6 +274,27 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                 #     yield CompilerNotice('Error', f'Parameter mismatch. Got {rhs_params}', element.rhs.location)
                 return
 
+            if decl_lhs is not None and isinstance(type_of_lhs, TypeType):
+                underlying = type_of_lhs.underlying
+                print(f"`{element.lhs}` is a type! We're constructing a `{underlying.name}`!")
+                assert type_of_lhs.callable[1] == underlying
+                if isinstance(underlying, GenericType) and any(
+                        isinstance(x, GenericType.GenericParam) for x in underlying.generic_params.values()):
+                    # TODO: generic type deduction?
+                    # still_generic = {
+                    #     k: v
+                    #     for k, v in underlying.generic_params.items() if isinstance(v, GenericType.GenericParam)
+                    # }
+                    # print(f"\tAnd it's still generic on `{'`, `'.join(still_generic.keys())}`!")
+                    # print(f"{','.join(x.name for x in type_of_lhs.callable[0])}")
+                    # ctor_generics = {
+                    #     k: v
+                    #     for k, v in still_generic.items() if any(v is p for p in type_of_lhs.callable[0])
+                    # }
+                    # print(f"\tCtor takes generic params `{'`, `'.join(ctor_generics.keys())}`!")
+                    # input('')
+                    raise NotImplementedError()
+
             if element.rhs is None:
                 if type_of_lhs.callable[0]:
                     yield CompilerNotice(
@@ -402,20 +311,25 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                     element.location)
                 return
 
+            allowed = True
             for lhs_param, rhs_param in zip(type_of_lhs.callable[0], element.rhs.values):
-                rhs_param_type = resolve_type(rhs_param, want=lhs_param)
-                if lhs_param != rhs_param_type:
-                    yield CompilerNotice(
-                        'Error', f"Parameter mismatch, expected `{lhs_param.name}`, got `{rhs_param_type.name}`.",
-                        rhs_param.location)
-
+                allowed |= yield from _check_conversion(resolve_type(rhs_param, want=lhs_param), lhs_param,
+                                                        rhs_param.location)
             _mark_checked_recursive(element.rhs)
+            if not allowed:
+                return
+                # if lhs_param != rhs_param_type:
+                #     yield CompilerNotice(
+                #         'Error', f"Parameter mismatch, expected `{lhs_param.name}`, got `{rhs_param_type.name}`.",
+                #         rhs_param.location)
+
         case Operator(oper=Token(type=TokenType.Equals)):
             yield from _check(element.lhs)
             yield from _check(element.rhs)
             try:
                 lhs_type_decl, lhs_member_decl = resolve_owning_type(element.lhs)
                 rhs_type = resolve_type(element.rhs)
+                # input(f'right hand of assignment ({type(element.rhs).__name__}) is {rhs_type.name}')
             except CompilerNotice as ex:
                 yield ex
                 return
@@ -428,10 +342,8 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             if isinstance(rhs_type, StaticVariableDecl):
                 rhs_decl = rhs_type
                 rhs_type = rhs_type.type
-            try:
-                _check_conversion(rhs_type, lhs_member_decl.type, element.location)
-            except CompilerNotice as ex:
-                yield ex
+            allowed = yield from _check_conversion(rhs_type, lhs_member_decl.type, element.location)
+            if not allowed:
                 return
         case Namespace():
             with ExitStack() as ex:
@@ -472,6 +384,10 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             yield from _check(element.value)
         case LexedLiteral():
             pass
+        # case Declaration():
+        #     yield CompilerNotice(
+        #         'Critical', f"Checks for `Declaration(initial={type(element.initial).__name__})` are not implemented!",
+        #         element.location)
         case _:
             yield CompilerNotice('Note', f"Checks for `{type(element).__name__}` are not implemented!",
                                  element.location)

@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Iterator, Generic, TypeVar, Sequence, Union, Self, NewType
-from dataclasses import field, dataclass
-from io import BytesIO
+from dataclasses import dataclass, field
 from enum import Enum
+from io import BytesIO
+from typing import Generic, Iterator, NewType, Self, Sequence, TypeVar, Union
 
-from .. import _encode_u32, BytecodeTypes, _encode_f32, _encode_u8
+from .. import BytecodeTypes, _encode_f32, _encode_u8, _encode_u32
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -37,9 +37,9 @@ class BytecodeContainer(Generic[T], BytecodeBase, ABC):
         yield from self.content
 
 
+from .binary import *
 from .code import *
 from .types import *
-from .binary import *
 
 
 def _to_bytes(in_: Iterator[BytecodeTypes | BytecodeBase], silent=False) -> Iterator[bytes]:

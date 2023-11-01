@@ -1,10 +1,10 @@
 from pathlib import Path
 from typing import Iterator, cast
 
-from . import SourceFile, ImmutableTokenStream, CompilerNotice, SourceLocation
-from .tokenizer import Token
-from .stream import StrStream, TokenStream
+from . import CompilerNotice, ImmutableTokenStream, SourceFile, SourceLocation
 from .lexer import Document, parse
+from .stream import StrStream, TokenStream
+from .tokenizer import Token
 from .util import set_contextvar
 
 DEFAULT_STD_ROOT = Path(__file__).parent.parent.parent / 'lib'
@@ -12,6 +12,7 @@ DEFAULT_STD_ROOT = Path(__file__).parent.parent.parent / 'lib'
 
 def parse_file(path: Path) -> Document:
     """Parse a single file"""
+    # input(f"compiling {path!r} relative to {Path.cwd()}")
     with set_contextvar(SourceFile, str(path.relative_to(Path.cwd()))), open(path, 'r', encoding='utf-8') as file:
         stream = TokenStream([], generator=Token.token_generator(StrStream(file)))
         doc = parse(cast(ImmutableTokenStream, stream))
@@ -36,4 +37,4 @@ def discover_files(root: Path) -> Iterator[Document]:
     assert root.is_dir()
     for file in root.glob('**/*.fu', case_sensitive=False):
         assert file.is_file()
-        yield parse_file(file)
+        yield parse_file(file.absolute())

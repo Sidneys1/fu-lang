@@ -1,25 +1,24 @@
 from dataclasses import replace
 from typing import Generator
 
-from ..lexer.lexed_literal import LexedLiteral
-
 from ...compiler import CompilerNotice
 from ...compiler.lexer import (Atom, Declaration, Document, ExpList, Identifier, Lex, Namespace, Operator,
                                ReturnStatement, Scope, Statement, Token, TokenType, Type_, TypeDeclaration)
+from ..lexer.lexed_literal import LexedLiteral
 
 
 def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
     match element:
-        case Operator(lhs=None):
-            yield CompilerNotice('Info',
-                                 f"{type(element.lhs).__name__} {element.oper.value} {type(element.rhs).__name__}",
-                                 element.location)
-            return element
-        case Operator(rhs=None):
-            yield CompilerNotice('Info',
-                                 f"{type(element.lhs).__name__} {element.oper.value} {type(element.rhs).__name__}",
-                                 element.location)
-            return element
+    # case Operator(lhs=None):
+    #     # yield CompilerNotice('Info',
+    #     #                      f"{type(element.lhs).__name__} {element.oper.value} {type(element.rhs).__name__}",
+    #     #                      element.location)
+    #     return element
+    # case Operator(rhs=None):
+    #     yield CompilerNotice('Info',
+    #                          f"{type(element.lhs).__name__} {element.oper.value} {type(element.rhs).__name__}",
+    #                          element.location)
+    #     return element
         case Operator(oper=Token(type=TokenType.Operator)):
             """Infix operator"""
             assert element.rhs is not None and element.lhs is not None
@@ -144,9 +143,9 @@ def _optimize(element: Lex) -> Generator[CompilerNotice, None, Lex]:
                     content.append(c)
             if different:
                 return replace(element, content=content)
-        case LexedLiteral() | Operator(oper=Token(type=TokenType.Dot)) | Operator(oper=Token(
-            type=TokenType.Equals)) | Identifier() | Namespace():
-            """Ignore"""
-        case _:
-            yield CompilerNotice('Note', f"Don't know how to optimize `{type(element).__name__}`.", element.location)
+        # case LexedLiteral() | Operator(oper=Token(type=TokenType.Dot)) | Operator(oper=Token(
+        #     type=TokenType.Equals)) | Identifier() | Namespace():
+        #     """Ignore"""
+        # case _:
+        #     yield CompilerNotice('Note', f"Don't know how to optimize `{type(element).__name__}`.", element.location)
     return element

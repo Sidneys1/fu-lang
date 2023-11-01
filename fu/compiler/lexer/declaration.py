@@ -1,14 +1,15 @@
-from typing import Iterable, Union, Self, TYPE_CHECKING, Union, Literal as Literal_
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Iterable
+from typing import Literal as Literal_
+from typing import Self, Union
 
 from .. import TokenStream
-from ..tokenizer import SourceLocation, TokenType, Token, NON_CODE_TOKEN_TYPES
-
-from . import (Identifier, Identity, Lex, LexError, Namespace, Type_, SpecialOperatorIdentity, _indent, _tab, ExpList,
-               GenericParamList)
+from ..tokenizer import NON_CODE_TOKEN_TYPES, SourceLocation, Token, TokenType
+from . import (ExpList, GenericParamList, Identifier, Identity, Lex, LexError, Namespace, SpecialOperatorIdentity,
+               Type_, _indent, _tab)
 
 if TYPE_CHECKING:
-    from . import Scope, Expression
+    from . import Expression, Scope
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -123,7 +124,7 @@ class Declaration(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        from . import Scope, Expression
+        from . import Expression, Scope
 
         raw: list[Lex, Token] = []
 

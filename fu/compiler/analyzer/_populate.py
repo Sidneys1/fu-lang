@@ -1,23 +1,21 @@
-from typing import Iterator
 from contextlib import ExitStack
+from typing import Iterator
 
 from ...types import BUILTINS
 from ...types.composed_types.generic_types.type_ import TypeType
-
 from .. import CompilerNotice
-from ..lexer import (Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_,
-                     TypeDeclaration)
-
+from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_, TypeDeclaration
 from . import _LOG
-
+from .create_new_interface import create_new_interface
+from .create_new_type import create_new_type
 from .resolvers import resolve_type
 from .scope import _PARSING_BUILTINS, AnalyzerScope
-from .static_type import create_new_type, type_from_lex
+from .static_type import type_from_lex
 from .static_variable_decl import StaticVariableDecl
 
 
 def _populate(element: Lex) -> Iterator[CompilerNotice]:
-    from .checks import _check_conversion
+    from .checks._check_conversion import _check_conversion
 
     # _LOG.debug(f"Populating static identifiers from {type(element).__name__} into {ScopeContext.current().fqdn}")
     match element:
@@ -39,6 +37,34 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                     scope = new_scope
                 for decl in element.static_scope:
                     yield from _populate(decl)
+        case TypeDeclaration(type='interface'):
+            scope = AnalyzerScope.current()
+            name = element.name.value
+            if name in scope.members:
+                old_value = scope.members[name]
+                raise CompilerNotice("Error",
+                                     f"`{name}` already defined.",
+                                     element.location,
+                                     extra=[CompilerNotice('Note', "Here.", old_value.location)])
+            elif (old_value := scope.in_scope(name)) is not None:
+                raise CompilerNotice("Warning",
+                                     f"`{name}` shadows existing name.",
+                                     element.location,
+                                     extra=[CompilerNotice('Note', "Here.", old_value.location)])
+            if _PARSING_BUILTINS.get() and name in BUILTINS:
+                t = BUILTINS[name]
+                _LOG.debug(f"Found interface definition for builtin `{name}`.")
+                scope.members[name] = StaticVariableDecl(t, element)
+                return
+
+            if element.definition is None:
+                raise CompilerNotice("Error", "Cannot forward-declare interfaces. Please provide an assignment.",
+                                     element.location)
+
+            if isinstance(element.definition, Type_):
+                scope.members[name] = StaticVariableDecl(type_from_lex(element.definition, scope), element)
+            else:
+                yield from create_new_interface(element, scope)
         case TypeDeclaration(type='type'):
             scope = AnalyzerScope.current()
             name = element.name.value
@@ -64,7 +90,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
 
             if isinstance(element.definition, Type_):
-                scope.members[name] = StaticVariableDecl(type_from_lex(element.definition, scope), element)
+                scope.members[name] = StaticVariableDecl(TypeType.of(type_from_lex(element.definition, scope)), element)
             else:
                 yield from create_new_type(element, scope)
         case Declaration(identity=Identity()):
@@ -114,27 +140,35 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 yield CompilerNotice("Warning",
                                      f"{element.identity.lhs.value!r} is shadowing an existing identifier!",
                                      element.identity.lhs.location,
-                                     extra=CompilerNotice("Note", "Here.", decl.location))
+                                     extra=[CompilerNotice("Note", "Here.", decl.location)])
 
-            if _PARSING_BUILTINS.get() and name in BUILTINS:
-                _LOG.debug(f"Found definition for builtin `{name}`.")
-                var_type = BUILTINS[name]
-            else:
-                # print(f'\n\n\nxxxx\n\n{element}')
-                var_type = type_from_lex(element.identity.rhs, scope)
+            try:
+                if _PARSING_BUILTINS.get() and name in BUILTINS:
+                    _LOG.debug(f"Found definition for builtin `{name}`.")
+                    var_type = BUILTINS[name]
+                else:
+                    # print(f'\n\n\nxxxx\n\n{element}')
+                    var_type = type_from_lex(element.identity.rhs, scope)
+            except CompilerNotice as ex:
+                yield ex
+                return
 
             if element.initial is not None and not isinstance(element.initial, (Scope, ExpList)):
-                rhs_type = resolve_type(element.initial, want=var_type)
-                if isinstance(var_type, TypeType) and rhs_type == var_type.underlying:
-                    var_type = var_type.underlying
-                elif var_type != rhs_type:
-                    try:
-                        _check_conversion(rhs_type, var_type, element.initial.location)
-                    except CompilerNotice as ex:
-                        yield ex
+                try:
+                    rhs_type = resolve_type(element.initial, want=var_type)
+                except CompilerNotice as ex:
+                    yield ex
+                else:
+                    if isinstance(var_type, TypeType) and rhs_type == var_type.underlying:
+                        var_type = var_type.underlying
+                    elif var_type != rhs_type:
+                        allowed = yield from _check_conversion(rhs_type, var_type, element.initial.location)
+                        if not allowed:
+                            return
             # Add to current scope
 
             _LOG.debug(f"Adding {name} to {scope.fqdn} as {var_type.name}")
+            # input()
             svd = StaticVariableDecl(var_type, element)
             scope.members[name] = svd
             if scope.this_decl is not None:

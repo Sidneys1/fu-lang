@@ -1,11 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Self, ClassVar
+from typing import ClassVar, Self
 
 from ....compiler.tokenizer import SpecialOperatorType
-
 from ... import ThisType, TypeBase
-
-from . import GenericType, ComposedType
+from . import ComposedType, GenericType
 
 
 def _type_generics():
@@ -37,16 +35,10 @@ class TypeType(GenericType):
     callable: tuple[tuple[TypeBase, ...], TypeBase] | None = field(init=False)
 
     def __post_init__(self):
+        GenericType.__post_init__(self)
         assert isinstance(self.generic_params['T'],
                           TypeBase), f"Underlying is unexpectedly a {type(self.underlying).__name__}!"
-        names = ','.join(k if v is None else v.name for k, v in self.generic_params.items())
-        object.__setattr__(self, '_name', self.name)
-        object.__setattr__(self, 'name', f"{self.name}<{names}>")
         object.__setattr__(self, 'underlying', self.generic_params['T'])
-
-    @classmethod
-    def of(cls, t: TypeBase) -> 'ComposedType':
-        return cls().resolve_generic_instance(preserve_inheritance=True, T=t)
 
 
 def _typetype_size(self: TypeType) -> int | None:
@@ -57,6 +49,7 @@ def _typetype_size(self: TypeType) -> int | None:
 def _typetype_callable(self: TypeType) -> tuple[tuple[TypeBase, ...], TypeBase] | None:
     if isinstance(self.underlying,
                   ComposedType) and SpecialOperatorType.Constructor in self.underlying.special_operators:
+        # input(self.underlying.special_operators)
         params, ret = self.underlying.special_operators[SpecialOperatorType.Constructor]
         assert isinstance(ret, ThisType)
         return params, ret.resolved

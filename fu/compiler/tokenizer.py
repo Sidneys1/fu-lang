@@ -1,10 +1,10 @@
-from typing import Iterator, Iterable
-from string import ascii_letters, digits
-from enum import Enum, auto
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from itertools import product
+from string import ascii_letters, digits
+from typing import Iterable, Iterator
 
-from . import StrStream, SourceLocation
+from . import SourceLocation, StrStream
 
 _SIGNEDNESS = ('iu')
 _SIZE = ('8', '16', '32', '64')
@@ -57,6 +57,8 @@ class SpecialOperatorType(Enum):
     Constructor = 'op='
     Call = 'op()'
     Index = 'op[]'
+    Iterate = 'op..'
+    Increment = 'op++'
 
 
 SPECIAL_OPERATORS = {x.value[2]: x for x in SpecialOperatorType}

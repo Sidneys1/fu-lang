@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from typing import Iterable, Union
 
 from .. import TokenStream
-
 from . import Lex
-from .operator import Operator
 from .atom import Atom
+from .operator import Operator
 
 
 @dataclass(repr=False, slots=True, frozen=True)

@@ -1,0 +1,4 @@
+------------- test\regression\basic.fu -------------
+[2m   2 | main: void() = [0;1m{ }[2m;[0m
+[2m     |[;33m                ^^^ Warning: Method initialized with an empty body.[0;2m (test\regression\basic.fu:1:16-18)
+[0m[m

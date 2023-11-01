@@ -1,23 +1,23 @@
+from contextlib import contextmanager
 from contextvars import ContextVar
 from contextvars import Token as ContextVarToken
 from dataclasses import dataclass, replace
 from enum import Enum
 from logging import getLogger
-from typing import ContextManager, Generator, Iterable, Iterator, Optional, TypeAlias
-from itertools import chain
+from typing import ContextManager, Generator, Iterable, Iterator, Optional
 
-from ..virtual_machine.bytecode import (BytecodeTypes, NumericTypes, OpcodeEnum, _encode_numeric, int_u8, _encode_u8,
-                                        _encode_f32)
-from ..types import TypeBase, ARRAY_TYPE, IntType, FloatType, STR_ARRAY_TYPE, GenericType
+from ..types import ARRAY_TYPE, STR_ARRAY_TYPE, VOID_TYPE, FloatType, GenericType, IntType, TypeBase
 from ..types.integral_types import *
+from ..virtual_machine.bytecode import (BytecodeTypes, NumericTypes, OpcodeEnum, _encode_f32, _encode_numeric,
+                                        _encode_u8, int_u8)
 from ..virtual_machine.bytecode.builder import BytecodeBuilder
 from ..virtual_machine.bytecode.structures import *
-
 from . import CompilerNotice
-from .analyzer.scope import AnalyzerScope, StaticVariableDecl, _CURRENT_ANALYZER_SCOPE
+from .analyzer.checks._check_conversion import _check_conversion
+from .analyzer.scope import _CURRENT_ANALYZER_SCOPE, AnalyzerScope, StaticVariableDecl
 from .analyzer.static_type import type_from_lex
-from .lexer import (Declaration, Identifier, Identity, Lex, Operator, ParamList, ReturnStatement, Scope, Statement,
-                    LexedLiteral)
+from .lexer import (Declaration, Identifier, Identity, Lex, LexedLiteral, Operator, ParamList, ReturnStatement, Scope,
+                    Statement)
 from .tokenizer import Token, TokenType
 from .util import is_sequence_of
 
@@ -28,7 +28,7 @@ REF_TYPE = GenericType('ref', size=4, reference_type=False, generic_params={'T':
 
 
 def make_ref(t: TypeBase) -> GenericType:
-    return REF_TYPE.resolve_generic_instance(T=t, preserve_inheritance=True)  # type: ignore
+    return REF_TYPE.resolve_generic_instance(T=t)  # type: ignore
 
 
 FUNCTIONS: BytecodeFunction = []
@@ -74,10 +74,19 @@ class CompileScope(ContextManager):
     def fqdn(self) -> str:
         names = [self.name]
         p = self.parent
-        while p is not None and p is not GLOBAL_COMPILE_SCOPE:
+        while p is not None and p.parent is not None:
             names.append(p.name)
             p = p.parent
         return '.'.join(reversed(names))
+
+
+@contextmanager
+def enter_global_scope(scope: CompileScope):
+    tok = _CURRENT_COMPILE_SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _CURRENT_COMPILE_SCOPE.reset(tok)
 
 
 class FunctionScope(CompileScope):
@@ -100,7 +109,7 @@ class FunctionScope(CompileScope):
     @staticmethod
     def current_fn() -> Optional['FunctionScope']:
         current: CompileScope | None = _CURRENT_COMPILE_SCOPE.get()
-        while current is not None and current is not GLOBAL_COMPILE_SCOPE and not isinstance(current, FunctionScope):
+        while current is not None and current.parent is not None and not isinstance(current, FunctionScope):
             current = current.parent
         assert current is None or isinstance(current, FunctionScope)
         return current
@@ -110,14 +119,13 @@ class FunctionScope(CompileScope):
         return f"{self.fqdn}({args})"
 
 
-GLOBAL_COMPILE_SCOPE = CompileScope('<GLOBAL SCOPE>', root=True)
-_CURRENT_COMPILE_SCOPE: ContextVar[CompileScope] = ContextVar('_CURRENT_COMPILE_SCOPE', default=GLOBAL_COMPILE_SCOPE)
+_CURRENT_COMPILE_SCOPE: ContextVar[CompileScope] = ContextVar('_CURRENT_COMPILE_SCOPE')
 
 
 def write_to_buffer(buffer: BytesIO, *args: BytecodeTypes | Enum, silent=False) -> None:
     for x in args:
-        if not silent:
-            print(repr(x))
+        # if not silent:
+        #     print(repr(x))
         match x:
             case tuple():
                 for y in x:
@@ -139,8 +147,8 @@ def write_to_buffer(buffer: BytesIO, *args: BytecodeTypes | Enum, silent=False) 
 
 def stream_to_bytes(in_: Iterator[BytecodeTypes], silent=False) -> Iterator[bytes]:
     for x in in_:
-        if not silent:
-            print(x)
+        # if not silent:
+        #     print(x)
         match x:
             case tuple():
                 yield from stream_to_bytes((y for y in x), silent=True)
@@ -162,13 +170,15 @@ def stream_to_bytes(in_: Iterator[BytecodeTypes], silent=False) -> Iterator[byte
 _BUILDER = BytecodeBuilder()
 
 
-def compile(scope: AnalyzerScope) -> Generator[CompilerNotice, None, BytecodeBinary | None]:
+def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
     _LOG.debug('\n\n\033#3STARTED COMPILING\n\033#4STARTED COMPILING\n\n')
-    main = scope.members.get('main')
+    global_scope = AnalyzerScope.current()
+    main = global_scope.members.get('main')
 
     if main is None:
         # dll?
-        yield CompilerNotice('Warning', "No symbol named `main` in global scope. Is this a DLL?", None)
+        yield CompilerNotice('Error', "No symbol named `main` in global scope. Is this a DLL?", None)
+        _LOG.critical(f"Nothing to compile (no `main` symbol). Exiting.")
         return
 
     assert isinstance(main, StaticVariableDecl), f"Main was a {type(main).__name__}"
@@ -181,27 +191,32 @@ def compile(scope: AnalyzerScope) -> Generator[CompilerNotice, None, BytecodeBin
         yield CompilerNotice('Error', "Main does not return an `i8`/`u8`/`void`, "
                              f"instead: `{return_type.name}`", main.lex.identity.rhs.ident.location)
         return None
-    if params not in ((), (STR_ARRAY_TYPE, )):
-        assert isinstance(main.lex, Declaration)
-        yield CompilerNotice(
-            'Error', "Main must take no arguments: `()`; or one argument: `(str[])`. "
-            f"Got `({', '.join(x.name for x in params)})` instead.", main.lex.identity.rhs.mods[-1].location)
-        return None
+    if params != ():
+        with global_scope.enter('main'):
+            allowed = yield from _check_conversion(params[0], STR_ARRAY_TYPE, main.lex.identity.rhs.mods[-1].location)
+        if not allowed:
+            yield CompilerNotice('Error', "Main must take no arguments: `()`; or one argument: `(str[])`. "
+                                 f"Got `({', '.join(x.name for x in params)})` instead.",
+                                 main.lex.identity.rhs.mods[-1].location,
+                                 extra=[ex])
+            return None
 
     main_func: BytecodeFunction
-    try:
-        main_func = compile_func(main)
-    except CompilerNotice as ex:
-        yield ex
-        return None
-    # ret = b''.join(to_bytes(main_func.encode()))
-    # func, x = BytecodeFunction.decode(ret)
-    # for block in func.content:
-    #     print("Block:")
-    #     for line in block.content:
-    #         print(f"\tLine: {line.content!r}")
-    _BUILDER.add_function(main_func)
-    ret = _BUILDER.finalize(entrypoint=main_func.address)
+    global_compile_scope = CompileScope('<ROOT>', True)
+    with enter_global_scope(global_compile_scope):
+        try:
+            main_func = compile_func(main)
+        except CompilerNotice as ex:
+            yield ex
+            return None
+        # ret = b''.join(to_bytes(main_func.encode()))
+        # func, x = BytecodeFunction.decode(ret)
+        # for block in func.content:
+        #     print("Block:")
+        #     for line in block.content:
+        #         print(f"\tLine: {line.content!r}")
+        _BUILDER.add_function(main_func)
+        ret = _BUILDER.finalize(entrypoint=main_func.address)
 
     return ret
 
@@ -310,8 +325,8 @@ def compile_expression(expression: Lex,
             # Get left side somewhere we can access it
             lhs_storage = retrieve(lhs_storage, buffer, expression.lhs.location)
             # input(f'Ran retrieve, lhs storage is now {lhs_storage}')
-            # _LOG.debug("...new storage")
-            if isinstance(lhs_storage.type, REF_TYPE):  # type: ignore # noqa: W1116  # pylint:disable=isinstance-second-argument-not-valid-type
+            _LOG.debug(f"...new storage is {lhs_storage.type.name}")
+            if isinstance(lhs_storage.type, GenericType) and REF_TYPE in lhs_storage.type.generic_inheritance:  # type: ignore # noqa: W1116  # pylint:disable=isinstance-second-argument-not-valid-type
                 assert isinstance(lhs_storage.type, GenericType)
                 lhs_deref = lhs_storage.type.generic_params['T']
                 assert not isinstance(lhs_deref, GenericType.GenericParam)
@@ -382,7 +397,7 @@ def compile_expression(expression: Lex,
                 f"Don't know how to compile `{type(expression.lhs).__name__} {expression.oper.value!r} {type(expression.rhs).__name__}`!",
                 expression.location)
         case _:
-            raise CompilerNotice('Error', f"Don't know how to compile `{type(expression).__name__}`!",
+            raise CompilerNotice('Error', f"Don't know how to compile expression `{type(expression).__name__}`!",
                                  expression.location)
 
 
@@ -524,7 +539,7 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
 
     assert isinstance(func.lex, Declaration)
     name = _BUILDER.add_string(func.lex.identity.lhs.value)
-    scope = _BUILDER.add_string('' if outer_scope is GLOBAL_COMPILE_SCOPE else outer_scope.fqdn)
+    scope = _BUILDER.add_string('' if outer_scope.parent is None else outer_scope.fqdn)
     signature = _BUILDER.add_type_type(func.type)
     address = _BUILDER.add_code(code)
 

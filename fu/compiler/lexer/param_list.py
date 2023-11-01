@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable, Union
 
 from .. import SourceLocation, TokenStream
-from ..tokenizer import TokenType, Token
-
+from ..tokenizer import Token, TokenType
 from . import Lex, LexError
 
 if TYPE_CHECKING:
