@@ -312,7 +312,7 @@ class SpecialOperatorIdentity(Lex):
     rhs: Type_
 
     def to_code(self) -> Iterable[str]:
-        yield f"{self.lhs.value}: {self.rhs}"
+        yield _tab() + f"{self.lhs.value}: {''.join(self.rhs.to_code())}"
 
     def __repr__(self) -> str:
         return f"SpecialOperator<{self.lhs!r}, {self.rhs!r}>"

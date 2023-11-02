@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 from typing import Literal as Literal_
 from typing import Self, Union
+from logging import getLogger
 
 from .. import TokenStream
 from ..tokenizer import NON_CODE_TOKEN_TYPES, SourceLocation, Token, TokenType
@@ -10,6 +11,8 @@ from . import (ExpList, GenericParamList, Identifier, Identity, Lex, LexError, N
 
 if TYPE_CHECKING:
     from . import Expression, Scope
+
+_LOG = getLogger(__package__)
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -45,10 +48,13 @@ class TypeDeclaration(Lex):
                 with _indent() as tab:
                     for x in self.raw[lindex + 1:rindex]:
                         if isinstance(x, Lex):
+                            _LOG.debug(f"formatting typedecl inside, got Lex: {type(x).__name__}: {str(x)!r}")
                             yield from x.to_code()
                         elif x.type == TokenType.BlankLine:
+                            _LOG.debug(f"formatting typedecl inside, got blankline: {x.value!r}")
                             yield x.value
                         else:
+                            _LOG.debug(f"formatting typedecl inside, got {type(x).__name__}: {x.value!r}")
                             yield tab + x.value
                 yield '}'
         else:
@@ -66,10 +72,15 @@ class TypeDeclaration(Lex):
         #     # yield from
         # yield ';'
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         if self.definition is None:
             return "typedecl", []
-        return "typedecl", [self.name] + (self.definition if isinstance(self.definition, list) else [self.definition])
+        rhs: list[Lex] = [self.name]
+        if isinstance(self.definition, list):
+            rhs.extend(self.definition)
+        else:
+            rhs.append(self.definition)
+        return "typedecl", rhs
 
     def __repr__(self) -> str:
         after = '' if self.definition is None else f'={self.definition!r}'
@@ -114,8 +125,8 @@ class Declaration(Lex):
         after = '' if self.initial is None else f'={self.initial!r}'
         return f"Declaration<{self.identity!r}{after}>"
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
-        ret = [self.identity]
+    def _s_expr(self) -> tuple[str, list[Lex]]:
+        ret: list[Lex] = [self.identity]
         # if self.metadata is not None:
         #     ret.append(self.metadata)
         if self.initial is not None:
@@ -126,14 +137,14 @@ class Declaration(Lex):
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         from . import Expression, Scope
 
-        raw: list[Lex, Token] = []
+        raw: list[Lex | Token] = []
 
         identity: Identity | None
         id_stack: list[Identifier] = []
         # metadata = None
         start: SourceLocation
         end: SourceLocation
-        initial = None
+        initial: Scope | Expression | ExpList | None = None
 
         # if (tok := stream.peek()) is not None and tok.type == TokenType.LBracket:
         #     start = stream.pop().location
@@ -189,16 +200,20 @@ class Declaration(Lex):
             generic_mod = identity.rhs.mods[0] if identity.rhs.mods else None
 
             if tok.type == TokenType.Semicolon:
-                return TypeDeclaration(raw,
-                                       identity.lhs,
-                                       identity.rhs.ident.value,
-                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                value = identity.rhs.ident.value
+                assert value == 'interface' or value == 'type'
+                return TypeDeclaration(
+                    raw,
+                    identity.lhs,
+                    value,  # type: ignore[arg-type]
+                    location=SourceLocation.from_to(raw[0].location, raw[-1].location))
             if tok.type != TokenType.Equals:
                 return None
             # Either a Type_ or a body.
+            inner: Type_ | list[Declaration | TypeDeclaration]
             if (tok := stream.peek()) is not None and tok.type == TokenType.LBrace:
                 raw.append(stream.pop())
-                inner: list[Declaration | TypeDeclaration] = []
+                inner = []
                 while True:
                     tok = stream.peek()
                     if tok.type == TokenType.RBrace:
@@ -215,15 +230,18 @@ class Declaration(Lex):
                 return None
             else:
                 inner = type_
-                raw.append(inner)
+                raw.append(type_)
 
             raw.append(stream.expect(TokenType.Semicolon))
-            return TypeDeclaration(raw,
-                                   identity.lhs,
-                                   identity.rhs.ident.value,
-                                   inner,
-                                   generic_mod,
-                                   location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+            assert identity.rhs.ident.value in ('interface', 'type')
+            assert generic_mod is None or isinstance(generic_mod, GenericParamList)
+            return TypeDeclaration(
+                raw,
+                identity.lhs,
+                identity.rhs.ident.value,  # type: ignore[arg-type]
+                inner,
+                generic_mod,
+                location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
         if (tok := stream.peek()) is not None and tok.type == TokenType.Equals:
             raw.append(stream.pop())

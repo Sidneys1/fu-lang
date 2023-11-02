@@ -71,7 +71,10 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                     existing = scope.in_scope(element.name.value)
                     if isinstance(existing, StaticVariableDecl):
                         # maybe an alias?
-                        if not existing.type.is_builtin:
+                        if existing.type.is_builtin:
+                            # Builtin
+                            _mark_checked_recursive(element)
+                        else:
                             yield CompilerNotice('Debug', f"Checking a type alias is not implemented yet...",
                                                  element.location)
                         return
@@ -100,7 +103,10 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                     existing = scope.in_scope(element.name.value)
                     if isinstance(existing, StaticVariableDecl):
                         # maybe an alias?
-                        if not existing.type.is_builtin:
+                        if existing.type.is_builtin:
+                            # Builtin
+                            _mark_checked_recursive(element)
+                        else:
                             yield CompilerNotice('Debug', f"Checking a type alias is not implemented yet...",
                                                  element.location)
                         return
@@ -349,7 +355,7 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             with ExitStack() as ex:
                 for ident in element.name:
                     name = ident.value
-                    ex.enter_context(AnalyzerScope.enter(name, location=element.location))
+                    ex.enter_context(AnalyzerScope.enter(name))
                 for decl in element.static_scope:
                     yield from _check(decl)
         case Document():

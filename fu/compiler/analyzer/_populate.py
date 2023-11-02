@@ -1,7 +1,6 @@
 from contextlib import ExitStack
 from typing import Iterator
 
-from ...types import BUILTINS
 from ...types.composed_types.generic_types.type_ import TypeType
 from .. import CompilerNotice
 from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_, TypeDeclaration
@@ -32,7 +31,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                              f"{name!r} already exists in {scope.fqdn}!",
                                              element.location,
                                              extra=extra)
-                    new_scope = ex.enter_context(AnalyzerScope.enter(name, location=element.location))
+                    if name in scope.scopes:
+                        new_scope = ex.enter_context(AnalyzerScope.enter(name))
+                    else:
+                        new_scope = ex.enter_context(AnalyzerScope.new(name, AnalyzerScope.Type.Namespace))
                     scope.members[name] = new_scope
                     scope = new_scope
                 for decl in element.static_scope:
@@ -51,11 +53,13 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      f"`{name}` shadows existing name.",
                                      element.location,
                                      extra=[CompilerNotice('Note', "Here.", old_value.location)])
-            if _PARSING_BUILTINS.get() and name in BUILTINS:
-                t = BUILTINS[name]
-                _LOG.debug(f"Found interface definition for builtin `{name}`.")
-                scope.members[name] = StaticVariableDecl(t, element)
-                return
+            if _PARSING_BUILTINS.get():
+                from ...types import BUILTINS
+                if name in BUILTINS:
+                    t = BUILTINS[name]
+                    _LOG.debug(f"Found interface definition for builtin `{name}`.")
+                    scope.members[name] = StaticVariableDecl(t, element)
+                    return
 
             if element.definition is None:
                 raise CompilerNotice("Error", "Cannot forward-declare interfaces. Please provide an assignment.",
@@ -79,11 +83,15 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      f"`{name}` shadows existing type.",
                                      element.location,
                                      extra=[CompilerNotice('Note', "Here.", old_value.location)])
-            if _PARSING_BUILTINS.get() and name in BUILTINS:
-                t = BUILTINS[name]
-                _LOG.debug(f"Found type definition for builtin `{name}`.")
-                scope.members[name] = StaticVariableDecl(t, element)
-                return
+            if _PARSING_BUILTINS.get():
+                from ...types import BUILTINS
+                if name in BUILTINS:
+                    t = BUILTINS[name]
+                    _LOG.debug(f"Found type definition for builtin `{name}`.")
+                    scope.members[name] = StaticVariableDecl(t, element)
+                    return
+                # else:
+                #     input(f"wtf, got non-builtin {name} when parsing builtins?")
 
             if element.definition is None:
                 raise CompilerNotice("Error", "Cannot forward-declare types. Please provide an assignment.",
@@ -143,6 +151,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      extra=[CompilerNotice("Note", "Here.", decl.location)])
 
             try:
+                from ...types import BUILTINS
                 if _PARSING_BUILTINS.get() and name in BUILTINS:
                     _LOG.debug(f"Found definition for builtin `{name}`.")
                     var_type = BUILTINS[name]

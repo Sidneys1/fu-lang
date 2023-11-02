@@ -3,7 +3,7 @@ from typing import Iterable, Optional
 
 from .. import SourceLocation, TokenStream
 from ..tokenizer import Token, TokenType
-from . import Expression, Lex, _tab
+from . import Expression, Lex, _tab, LexError
 
 
 @dataclass(repr=False, slots=True, frozen=True)
@@ -25,9 +25,10 @@ class ReturnStatement(Lex):
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         raw: list[Lex | Token] = [stream.expect(TokenType.ReturnKeyword, quiet=True)]
         value = None
-        try:
-            raw.append(value := Expression.try_lex(stream))
-        except Exception as ex:
-            pass
+        if stream.peek().type != TokenType.Semicolon:
+            value = Expression.try_lex(stream)
+            if value is None:
+                raise LexError()
+            raw.append(value)
         raw.append(stream.expect(TokenType.Semicolon))
         return ReturnStatement(raw, value, location=SourceLocation.from_to(raw[0].location, raw[-1].location))

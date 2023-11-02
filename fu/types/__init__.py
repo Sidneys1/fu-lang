@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field, replace
-from typing import Any
-from typing import Literal as Literal_
-from typing import Self
+from typing import Any, Literal, Self, ClassVar, Optional
 
 BUILTIN_NAMES = {
     'type',
@@ -26,11 +24,14 @@ BUILTIN_NAMES = {
 
     # Enum Types
     'bool',
+
+    # Generic types
+    'Array',
 }
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class TypeBase:
+class TypeBase:  # type: ignore[misc]
     """Base class for all typing (runtime or static)."""
     name: str = field(kw_only=False)
     size: int | None
@@ -40,12 +41,13 @@ class TypeBase:
     callable: tuple[tuple['TypeBase', ...], 'TypeBase'] | None = None
     members: dict[str, 'TypeBase'] = field(default_factory=dict)
     const: bool = field(compare=False, default=False)
-    is_builtin: bool = field(init=False, default=False)
+    is_builtin: bool = field(default=False)
 
     def __post_init__(self) -> None:
-        from ..compiler.analyzer.scope import _CURRENT_ANALYZER_SCOPE, _PARSING_BUILTINS
-        object.__setattr__(self, 'is_builtin', (_CURRENT_ANALYZER_SCOPE.get(None) is None or _PARSING_BUILTINS.get())
-                           and self.name in BUILTIN_NAMES)
+        # from ..compiler.analyzer.scope import _CURRENT_ANALYZER_SCOPE, _PARSING_BUILTINS
+        # object.__setattr__(self, 'is_builtin', (_CURRENT_ANALYZER_SCOPE.get(None) is None or _PARSING_BUILTINS.get())
+        #                    and (self.name in BUILTIN_NAMES or getattr(self, '_name', '!') in BUILTIN_NAMES))
+        pass
 
     def __instancecheck__(self, __instance: Any) -> bool:
         return isinstance(__instance, TypeBase) and __instance.inherits is not None and self in __instance.inherits
@@ -77,25 +79,22 @@ class TypeBase:
         )
 
 
-VOID_TYPE = TypeBase('void', size=0)
-
-from .composed_types import *
-from .integral_types import *
+VOID_TYPE = TypeBase('void', size=0, is_builtin=True)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, eq=False)
-class ThisType(TypeBase):
+class ThisType(TypeBase):  # type: ignore[misc]
     """Represents the temporary value of `this` while still defining a type."""
     name: str = field(init=False, default='this')
-    size: ClassVar[None] = None
-    reference_type: ClassVar[Literal_[True]] = True
-    inherits: ClassVar[None] = None
-    indexable: ClassVar[None] = None
-    callable: ClassVar[None] = None
+    size: ClassVar[None] = None  # type: ignore[misc]
+    reference_type: ClassVar[Literal[True]] = True  # type: ignore[misc]
+    inherits: ClassVar[None] = None  # type: ignore[misc]
+    indexable: ClassVar[None] = None  # type: ignore[misc]
+    callable: ClassVar[None] = None  # type: ignore[misc]
 
-    resolved: ComposedType | None = field(init=False, default=None)
+    resolved: Optional['ComposedType'] = field(init=False, default=None)
 
-    def resolve(self, resolved: ComposedType):
+    def resolve(self, resolved: 'ComposedType'):
         object.__setattr__(self, 'resolved', resolved)
         object.__setattr__(self, 'name', f"this<{resolved.name}>")
 
@@ -104,11 +103,9 @@ class ThisType(TypeBase):
         #      or self.resolved == __value.resolved)
 
 
-# def this_name(self: ThisType) -> str:
-#     return self.name if self.resolved is None
-# ThisType.name = property()
+from .composed_types import *
+from .integral_types import *
 
-# from .composed_types.type import TYPE_TYPE
 from .composed_types.generic_types import *
 from .composed_types.generic_types.array import ARRAY_TYPE
 from .composed_types.generic_types.interface import *
@@ -141,4 +138,5 @@ BUILTINS: dict[str, TypeBase] = {
 
     # Enum Types
     'bool': BOOL_TYPE,
+    'Array': ARRAY_TYPE,
 }

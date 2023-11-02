@@ -8,6 +8,7 @@ ARRAY_TYPE = GenericType('Array',
                          indexable=((SIZE_TYPE, ), ARRAY_GENERIC_PARAM),
                          members={'length': USIZE_TYPE},
                          readonly={'length'},
-                         generic_params={'T': ARRAY_GENERIC_PARAM})
+                         generic_params={'T': ARRAY_GENERIC_PARAM},
+                         is_builtin=True)
 
 __all__ = ('ARRAY_GENERIC_PARAM', 'ARRAY_TYPE')

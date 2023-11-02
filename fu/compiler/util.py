@@ -19,11 +19,17 @@ def is_sequence_of(s: Sequence[Any], _type: Type[T]) -> TypeGuard[Sequence[T]]: 
     return all(isinstance(x, _type) for x in s)
 
 
-def collect_returning_generator[G,R](generator: Generator[G, None, R]) -> tuple[R, list[G]]:
+R = TypeVar('R')
+
+
+def collect_returning_generator(generator: Generator[T, None, R]) -> tuple[R, list[T]]:
     """Return a tuple of the return value and a list of the elements of a generator."""
-    ret: R = None  # noqa
+    ret: R
+    ret = None  # type: ignore
+
     def _():
         nonlocal ret
         ret = yield from generator
+
     ret2 = list(_())
     return ret, ret2

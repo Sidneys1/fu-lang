@@ -1,8 +1,9 @@
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Iterable, Optional, Self, Union
+from typing import TYPE_CHECKING, Iterable, Optional, Union, cast
 
 from ..stream import QuietStreamExpectError
 from ..tokenizer import SourceLocation, Token, TokenType
+
 from . import _LOG, ImmutableTokenStream, Lex, LexWarning, TokenStream
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class Operator(Lex):
     rhs: Union['Atom', 'Identifier', 'Operator', 'ExpList', None]
     oper: 'Token'
 
-    def _s_expr(self) -> tuple[str, list[Self]]:
+    def _s_expr(self) -> tuple[str, list[Lex]]:
         from .atom import Atom
         match self.oper.type:
             case TokenType.LParen:
@@ -47,6 +48,7 @@ class Operator(Lex):
 
         if self.lhs is None:
             rhs = self.rhs.value if isinstance(self.rhs, Atom) else self.rhs
+            assert rhs is not None
             return oper, [rhs]
 
         lhs = self.lhs.value if isinstance(self.lhs, Atom) else self.lhs
@@ -58,27 +60,32 @@ class Operator(Lex):
     def to_code(self) -> Iterable[str]:
         match self.oper.type:
             case TokenType.Dot:
+                assert self.lhs is not None and self.rhs is not None
                 yield from self.lhs.to_code()
                 yield '.'
                 yield from self.rhs.to_code()
                 return
             case TokenType.LParen:
+                assert self.lhs is not None and self.rhs is not None
                 yield from self.lhs.to_code()
                 yield '('
                 yield from self.rhs.to_code()
                 yield ')'
                 return
             case TokenType.LBracket:
+                assert self.lhs is not None and self.rhs is not None
                 yield from self.lhs.to_code()
                 yield '['
                 yield from self.rhs.to_code()
                 yield ']'
                 return
         if self.lhs is None:
+            assert self.rhs is not None
             yield self.oper.value
             yield from self.rhs.to_code()
         elif self.rhs is None:
-            yield from self.lhs
+            assert self.lhs is not None
+            yield from self.lhs.to_code()
             yield self.oper.value
         else:
             yield from self.lhs.to_code()
@@ -101,6 +108,7 @@ class Operator(Lex):
                 return f"{self.lhs}{self.oper.value}"
             case _, _, _:
                 return f"{self.lhs} {self.oper.value} {self.rhs}"
+        raise NotImplementedError()
 
     def __repr__(self) -> str:
         match self.oper.type:
@@ -117,7 +125,7 @@ class Operator(Lex):
         return f"Operator<{self.lhs!r}{oper}{self.rhs!r}>"
 
     @classmethod
-    def try_lex(cls, istream: ImmutableTokenStream, min_bp=0) -> Optional['Lex']:
+    def try_lex(cls, istream: ImmutableTokenStream, min_bp=0) -> Optional['Lex']:  # type: ignore[override]
         _LOG.debug("%sTrying to lex `%s` (min_bp=%d)", '| ' * istream.depth, cls.__name__, min_bp)
         with istream.clone() as stream:
             try:
@@ -132,12 +140,13 @@ class Operator(Lex):
                 _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
             except QuietStreamExpectError:
                 pass
+        raise NotImplementedError()
 
     @classmethod
     def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
         from .atom import Atom
         lhs: Atom | Operator | None
-        raw: list[Lex, Token] = []
+        raw: list[Lex | Token] = []
         if not stream.eof and stream.peek().type in (TokenType.Operator, TokenType.Dot):
             # Prefix operator
             oper = stream.pop()
@@ -146,7 +155,7 @@ class Operator(Lex):
             _LOG.debug("%sPrefix is %s", '| ' * stream.depth, oper.value)
             _, r_bp = PREFIX_BINDING_POWER[oper.value]
             # TODO
-            if (lhs := Operator.try_lex(stream, r_bp)) is None:
+            if (lhs := cast(Atom | Operator | None, Operator.try_lex(stream, r_bp))) is None:
                 return None
             from .lexed_literal import LexedLiteral
             if isinstance(lhs, LexedLiteral

@@ -1,3 +1,3 @@
-main: u8(args: str[]) = {
+main: u64(args: str[]) = {
     return args.length;
 };

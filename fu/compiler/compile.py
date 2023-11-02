@@ -177,8 +177,8 @@ def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
 
     if main is None:
         # dll?
-        yield CompilerNotice('Error', "No symbol named `main` in global scope. Is this a DLL?", None)
-        _LOG.critical(f"Nothing to compile (no `main` symbol). Exiting.")
+        yield CompilerNotice('Error', "No entrypoint (symbol named `main`) found in global scope.", None)
+        # _LOG.critical(f"Nothing to compile (no `main` symbol). Exiting.")
         return
 
     assert isinstance(main, StaticVariableDecl), f"Main was a {type(main).__name__}"
@@ -186,7 +186,7 @@ def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
         yield CompilerNotice('Error', "Main must be a method.", main.location)
         return None
     params, return_type = main.type.callable
-    if return_type not in (VOID_TYPE, U8_TYPE, I8_TYPE):
+    if return_type not in (VOID_TYPE, U8_TYPE, I8_TYPE, U16_TYPE, I16_TYPE, U32_TYPE, I32_TYPE, U64_TYPE, I64_TYPE):
         assert isinstance(main.lex, Declaration)
         yield CompilerNotice('Error', "Main does not return an `i8`/`u8`/`void`, "
                              f"instead: `{return_type.name}`", main.lex.identity.rhs.ident.location)

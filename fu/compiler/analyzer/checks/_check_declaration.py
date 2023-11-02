@@ -25,6 +25,7 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
                              extra=[CompilerNotice('Note', "Here.", location=outer_decl.location)])
     # Check redefinition
     if (inner_decl := scope.members.get(element.identity.lhs.value, None)) is not None:
+        assert isinstance(inner_decl, StaticVariableDecl), f"Was unexpectedly {type(inner_decl).__name__}"
         # TODO: overloaded methods
         # if isinstance(inner_decl, OverloadedMethodDecl):
         #     ...

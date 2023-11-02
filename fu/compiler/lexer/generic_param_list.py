@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, cast
 
 from .. import TokenStream
 from ..tokenizer import SourceLocation, Token, TokenType
@@ -32,11 +32,11 @@ class GenericParamList(Lex):
         return f"GenericParamList<{inner}>"
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
-        return 'generics', self.params
+        return 'generics', cast(list[Lex], self.params)
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
-        raw: list[Lex, Token] = [stream.expect(TokenType.LessThan, quiet=True)]
+        raw: list[Lex | Token] = [stream.expect(TokenType.LessThan, quiet=True)]
 
         if (tok := stream.peek()) is not None and tok.type == TokenType.GreaterThan:
             raw.append(stream.expect(TokenType.GreaterThan))

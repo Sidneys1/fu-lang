@@ -24,7 +24,7 @@ class ParsedArgs(Protocol):
     std: Path
 
     @staticmethod
-    def files(string: str) -> Path:
+    def parse_files(string: str) -> Path:
         ret = Path(string).absolute()
         if not ret.is_file():
             raise ArgumentError(None, f"`{ret}` is not a file.")
@@ -34,7 +34,7 @@ class ParsedArgs(Protocol):
         return ret  #.relative_to(cwd)
 
     @staticmethod
-    def root_path(string: str) -> Path:
+    def parse_root_path(string: str) -> Path:
         ret = Path(string).absolute()
         if not ret.is_dir():
             raise ArgumentError(None, f"`{ret}` is not a directory.")
@@ -44,7 +44,7 @@ class ParsedArgs(Protocol):
         return ret.relative_to(cwd)
 
     @staticmethod
-    def std_path(string: str) -> Path:
+    def parse_std_path(string: str) -> Path:
         ret = Path(string).absolute()
         if not ret.is_dir():
             raise ArgumentError(None, f"`{ret}` is not a directory.")
@@ -61,7 +61,7 @@ def main(*args) -> int:
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--std',
                         metavar='STD',
-                        type=ParsedArgs.std_path,
+                        type=ParsedArgs.parse_std_path,
                         help="Path to the standard library (default: `%(default)s`).",
                         default=DEFAULT_STD_ROOT)
     positional = parser.add_mutually_exclusive_group(required=True)
@@ -69,18 +69,18 @@ def main(*args) -> int:
                             '--files',
                             metavar='FILE',
                             nargs='+',
-                            type=ParsedArgs.files,
+                            type=ParsedArgs.parse_files,
                             help='Compile theses pecific source files. Mutually exclusive with `DIR`.')
     positional.add_argument(
         'root',
         metavar='DIR',
         nargs='*',
-        type=ParsedArgs.root_path,
+        type=ParsedArgs.parse_root_path,
         help=
         'Compile source files found under this directory (default: `%(default)s`). Mutually exclusive with `--files`.',
         default='.' + pathsep)
     ns: ParsedArgs
-    ns, unknown_args = parser.parse_known_args(args)
+    ns, unknown_args = parser.parse_known_args(args)  # type: ignore
 
     if ns.verbose:
         basicConfig(level=DEBUG)
@@ -96,8 +96,8 @@ def main(*args) -> int:
             for root in ns.root:
                 docs.extend(discover_files(root))
         else:
-            for file in ns.files:
-                docs.append(parse_file(file))
+            for f in ns.files:
+                docs.append(parse_file(f))
         errors = list(check_program(docs))
 
         if not ns.check_only and all(error.level.lower() not in ('error', 'critical') for error in errors):

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Iterable, Union
+from typing import cast, Union
 
 from .. import TokenStream
 from . import Lex
@@ -18,5 +18,6 @@ class Expression(Lex):
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         for t in (Operator, Atom):
-            if (ret := t.try_lex(stream)) is not None:
+            if (ret := cast(Lex, t).try_lex(stream)) is not None:
                 return ret
+        return None

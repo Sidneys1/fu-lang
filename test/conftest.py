@@ -17,15 +17,18 @@ assert (SRC / 'fu' / '__init__.py').is_file()
 
 sys.path.insert(0, str(SRC))
 
+
 def pytest_configure(config):
     basicConfig(level=DEBUG if config.getoption("verbose") > 0 else ERROR)
 
+
 @fixture
 def global_scope():
-    from fu.compiler.analyzer.scope import set_global_scope, AnalyzerScope 
-    global_scope = AnalyzerScope(None)
+    from fu.compiler.analyzer.scope import set_global_scope, AnalyzerScope
+    global_scope = AnalyzerScope(None, AnalyzerScope.Type.Namespace)
     with set_global_scope(global_scope):
         yield global_scope
+
 
 class FakeFile(AbstractContextManager[StringIO]):
     """Represents a fake file based on StringIO contents."""

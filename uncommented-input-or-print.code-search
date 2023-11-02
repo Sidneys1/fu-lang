@@ -1,0 +1,39 @@
+# Query: ^\\s*(input)\\(
+# Flags: RegExp
+# Excluding: fu/compiler/__main__.py,fu/compiler/console.py,README.md
+# ContextLines: 1
+
+5 results - 5 files
+
+fu\compiler\analyzer\resolvers.py:
+  89              if lhs_type.callable:
+  90              if lhs_type.callable:
+  91:                 input(f"`{element}` returns `{lhs_type.callable[1].name}`")
+  91                  return lhs_type.callable[1]
+  92                  return lhs_type.callable[1]
+
+fu\compiler\analyzer\checks\__init__.py:
+  253                  type_of_lhs = type_of_lhs.type
+  254                  type_of_lhs = type_of_lhs.type
+  255:                 input(f"type of {element.lhs} is {type(type_of_lhs).__name__}:{type_of_lhs.name}")
+  255  
+  256  
+
+fu\compiler\analyzer\checks\_check_conversion.py:
+  106          case _, InterfaceType():
+  107          case _, InterfaceType():
+  108:             input(f"checking conversion between `{from_.name}` to interface `{to_.name}`")
+  108              errs = _check_satisfies_interface(from_, to_, location)
+  109              errs = _check_satisfies_interface(from_, to_, location)
+
+fu\types\composed_types\generic_types\__init__.py:
+  152          special_operators[sk] = tuple(_quick_generic(p) for p in sv[0]), _quick_generic(sv[1])
+  153          special_operators[sk] = tuple(_quick_generic(p) for p in sv[0]), _quick_generic(sv[1])
+  154:         input(f"Resolving special operator {sk.name} for {t.name} from `{sv[1].name}({', '.join(x.name for x in sv[0])})` to `{special_operators[sk][1].name}({',  '.join(x.name for x in special_operators[sk][0])})`")
+  154  
+  155  
+
+fu\virtual_machine\__init__.py:
+  82      def run(self):
+  83:         input('% Press enter to run...')
+  84          while True:

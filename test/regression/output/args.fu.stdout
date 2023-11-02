@@ -1,6 +1,0 @@
-------------- test\regression\args.fu -------------
-[2m   1 | main: u8(args: str[]) = {[0m
-[2m   2 |     return args[0;1m.length[2m;[0m
-[2m     |[;33m                ^^^^^^^ Warning: Narrowing when implicitly converting from a `usize_t` (64bit unsigned) to a `u8` (8bit unsigned).[0;2m (test\regression\args.fu:2:16-22)
-[0;2m   3 | }; [0m
-[m

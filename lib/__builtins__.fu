@@ -20,3 +20,8 @@ usize_t: type;
 bool: type;
 
 str: type = u8[];
+
+Array: type<T> = {
+  op[]: T(usize_t);
+  length: size_t;
+};

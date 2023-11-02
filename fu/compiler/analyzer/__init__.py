@@ -74,10 +74,10 @@ def check_program(program: Iterable[Document]):
 
     _LOG.debug(f"Checked elements: {len(CHECKED_ELEMENTS):,}")
 
-    unchecked_elements = [x for x in ALL_ELEMENTS if x not in CHECKED_ELEMENTS]
-    for elem in unchecked_elements:
-        if any(elem in x._s_expr()[1] for x in unchecked_elements):
-            continue
-        yield CompilerNotice('Info',
-                             f"Element `{type(elem).__name__}` was unchecked by static analysis.",
-                             location=elem.location)
+    # unchecked_elements = [x for x in ALL_ELEMENTS if x not in CHECKED_ELEMENTS]
+    # for elem in unchecked_elements:
+    #     if any(elem in x._s_expr()[1] for x in unchecked_elements):
+    #         continue
+    #     yield CompilerNotice('Info',
+    #                          f"Element `{type(elem).__name__}` was unchecked by static analysis.",
+    #                          location=elem.location)

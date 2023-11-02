@@ -50,9 +50,13 @@ class CompilerNotice(Exception):
     message: str
     location: SourceLocation | None
     extra: list[Self]
-    _source: inspect.FrameInfo
+    _source: list[inspect.FrameInfo]
 
-    def __init__(self, level: str | Level, message: str, location: SourceLocation, extra: list[Self] | None = None):
+    def __init__(self,
+                 level: str | Level,
+                 message: str,
+                 location: SourceLocation | None,
+                 extra: list[Self] | None = None):
         if isinstance(level, str):
             level = CompilerNotice.Level[level]
         self.level = level
@@ -99,7 +103,7 @@ class Stream(ImmutableStream[T, Tk], Protocol):
     def commit(self) -> None:
         """
         Commit this stream.
-        
+
         This indicates to the parent stream to advance its head to match this one.
         """
 
@@ -113,8 +117,8 @@ class StrStream(Stream[str, 'StrStream'], Protocol):
     @property
     def tail(self) -> str | None:
         """
-        Gets the last line of the file. 
-        
+        Gets the last line of the file.
+
         Used to report where parsing failed when not consuming the entire document.
         """
 

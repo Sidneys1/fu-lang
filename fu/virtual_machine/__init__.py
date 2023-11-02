@@ -54,7 +54,7 @@ class VM:
 
     _stack_frames: list[StackFrame] = []
 
-    heap: list[tuple[Any, ...] | str] = []
+    heap: list[Any] = []
 
     def _heap_repr(self) -> str:
         return '{' + ', '.join(f"@{i}: {v!r}" for i, v in enumerate(self.heap)) + '}'

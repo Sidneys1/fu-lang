@@ -1,1 +1,1 @@
-  [91mError: No symbol named `main` in global scope. Is this a DLL?[0;2m
+  [91mError: No entrypoint (symbol named `main`) found in global scope.[0;2m

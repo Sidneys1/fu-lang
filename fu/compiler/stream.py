@@ -63,7 +63,7 @@ class StrStream(_StrStream):
         return len(self.__line) == 0
 
     @property
-    def tail(self) -> str:
+    def tail(self) -> str | None:
         if self.eof:
             return None
         return self.__line[self.__line_pos:]

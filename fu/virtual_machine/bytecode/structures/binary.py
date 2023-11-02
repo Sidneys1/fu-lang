@@ -77,8 +77,8 @@ class BytecodeBinary(BytecodeBase):
         # yield self.functions
         _LOG.debug("Functions count")
         yield _encode_numeric(len(self.functions), int_u16)
-        for i, t in enumerate(self.functions):
-            t_buf = b''.join(t.encode())
+        for i, f in enumerate(self.functions):
+            t_buf = b''.join(f.encode())
             _LOG.debug(f"\tFunction #{i}")
             yield _encode_numeric(len(t_buf), int_u16), t_buf
 

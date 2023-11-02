@@ -94,6 +94,7 @@ from conftest import FakeFile
 
 
 def _test_formatting(input_: str, output: str):
+    assert input_ == output
     diffs = '\n\t'.join(
         f"Line {i}: {line[0:2]}{line[2:]!r}"
         for i, line in enumerate(Differ().compare(input_.splitlines(keepends=True), output.splitlines(keepends=True)))

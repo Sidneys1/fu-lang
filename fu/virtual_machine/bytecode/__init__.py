@@ -53,8 +53,8 @@ _encode_u32: Callable[[int_u32], bytes] = partial(_encode_struct, '>I')
 _encode_u64: Callable[[int_u64], bytes] = partial(_encode_struct, '>L')
 
 float_f16 = NewType('float_f16', float)
-float_f32 = NewType('float_f16', float)
-float_f64 = NewType('float_f16', float)
+float_f32 = NewType('float_f32', float)
+float_f64 = NewType('float_f64', float)
 
 _encode_f16: Callable[[float_f16], bytes] = partial(_encode_struct, '>e')
 _encode_f32: Callable[[float_f32], bytes] = partial(_encode_struct, '>f')
@@ -246,6 +246,6 @@ def to_bytes(in_: Iterator[BytecodeTypes]) -> Iterator[int]:
             case bytes():
                 yield from x
             case bool():
-                yield b'\x01' if x else b'\x00'
+                yield 1 if x else 0
             case _:
                 yield x

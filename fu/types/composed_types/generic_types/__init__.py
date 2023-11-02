@@ -1,13 +1,14 @@
 from dataclasses import dataclass, field, replace
 from logging import getLogger
-from typing import Self, Union
+from typing import Self, Union, ClassVar, cast
 
 from ....compiler import CompilerNotice, SourceLocation
 from ....compiler.tokenizer import SpecialOperatorType
-from ... import TypeBase, ThisType
+from ... import TypeBase
 from .. import ComposedType
 
 _LOG = getLogger(__package__)
+
 
 def _is_generic_of(t: 'GenericType', p: 'GenericType.GenericParam') -> bool:
     # _LOG.debug(f"Checking if {t.name} is generic of {p.name}")
@@ -26,7 +27,8 @@ def _is_generic_of(t: 'GenericType', p: 'GenericType.GenericParam') -> bool:
 
 
 def _rebuild_generic_type(t: 'GenericType',
-                          new: dict[str, TypeBase], location: SourceLocation | None = None) -> Union[ComposedType, 'GenericType']:
+                          new: dict[str, TypeBase],
+                          location: SourceLocation | None = None) -> Union[ComposedType, 'GenericType']:
     # input(f"Building generic type! Base: {t.name} with new params {new}")
     inherits: list[TypeBase] = []
     indexable: tuple[tuple[TypeBase, ...], TypeBase] | None = None
@@ -38,7 +40,8 @@ def _rebuild_generic_type(t: 'GenericType',
     all_generics = dict(**t.generic_params)
     all_generics.update(new)
     still_generics = {k: v for k, v in all_generics.items() if isinstance(v, GenericType.GenericParam)}
-    new_this = ThisType()
+    from ... import ThisType
+    new_this = ThisType()  # type: ignore[call-arg]
 
     updated_generics: dict[str, TypeBase] = {}
     """Generics (resolved or not) being replaced *this round*."""
@@ -57,9 +60,10 @@ def _rebuild_generic_type(t: 'GenericType',
     # else:
     #     input(f"NOT adding {t.name} to generic inheritance ({bool(updated_generics)=} and {t not in generic_inheritance=})!")
 
-    # Make sure we're 
+    # Make sure we're
     if not_generic := [g for g in updated_generics if not isinstance(t.generic_params[g], GenericType.GenericParam)]:
-        raise CompilerNotice('Error', f"Generic parameter(s) `{'`, `'.join(not_generic)}` have already been resolved!", location)
+        raise CompilerNotice('Error', f"Generic parameter(s) `{'`, `'.join(not_generic)}` have already been resolved!",
+                             location)
 
     # still_generic = bool(still_generics)
 
@@ -67,7 +71,7 @@ def _rebuild_generic_type(t: 'GenericType',
         match _t:
             case GenericType.GenericParam() if _t not in not_updated_generics.values():
                 return next((updated_generics[k] for k, v in t.generic_params.items()
-                        if isinstance(v, GenericType.GenericParam) and k in updated_generics and v is _t), _t)
+                             if isinstance(v, GenericType.GenericParam) and k in updated_generics and v is _t), _t)
             case GenericType():
                 # print(f'Found generic nested type: {_t.name}')
                 to_update: dict[str, TypeBase] = {}
@@ -116,17 +120,23 @@ def _rebuild_generic_type(t: 'GenericType',
                 # input(f"Oops, this type: {_t.name}")
                 return new_this
             case ThisType(resolved=GenericType()) if _t.resolved not in not_updated_generics.values():
-                ret = ThisType()
-                ret.resolve(_quick_generic(_t.resolved))
+                ret = ThisType()  # type: ignore[call-arg]
+                assert _t.resolved is not None
+                resolved = _quick_generic(_t.resolved)
+                assert isinstance(resolved, ComposedType)
+                ret.resolve(resolved)
                 return ret
             case ThisType(resolved=TypeBase()):
-                raise NotImplementedError(f"Don't know how to resolve other this?? For {_t.name} when converting {t.name} with {', '.join(f"{k}={v.name}" for k, v in new.items())}")
+                nf = ', '.join(f"{k}={v.name}" for k, v in new.items())
+                raise NotImplementedError(
+                    f"Don't know how to resolve other this?? For {_t.name} when converting {t.name} with {nf}")
             case ThisType():
                 raise NotImplementedError("Don't know how to resolve unbound this??")
             case _:
                 # _LOG.debug(f"Don't know how to resolve generic of {_t.name} ({type(_t).__name__}/{type(_t).__bases__})!")
                 return _t
-            
+        raise NotImplementedError()
+
     # 2. Inherits
     if t.inherits is not None:
         for i in t.inherits:
@@ -155,16 +165,19 @@ def _rebuild_generic_type(t: 'GenericType',
 
     all_params = dict(t.generic_params)
     all_params.update(updated_generics)
-    
+
     # if t not in inherits and any(not isinstance(g, GenericType.GenericParam) for g in updated_generics.values()):
-        # input(f"Inserting supertype because {tuple(x for x in updated_generics if not isinstance(x, GenericType.GenericParam))}")
-        # inherits.insert(0, t)
+    # input(f"Inserting supertype because {tuple(x for x in updated_generics if not isinstance(x, GenericType.GenericParam))}")
+    # inherits.insert(0, t)
 
     # if still_generic:
     from .type_ import TypeType
 
     # from .interface import InterfaceType
-    kwargs: dict = dict(name=t._name, size=None, inherits=tuple(inherits), indexable=indexable,
+    kwargs: dict = dict(name=t._name,
+                        size=None,
+                        inherits=tuple(inherits),
+                        indexable=indexable,
                         reference_type=t.reference_type,
                         callable=callable,
                         members=members,
@@ -181,10 +194,11 @@ def _rebuild_generic_type(t: 'GenericType',
         del kwargs['callable']
     ret = type(t)(**kwargs)
     new_this.resolve(ret)
-    mode = f'still-generic-on-`{'`-`'.join(still_generics)}`' if still_generics else 'fully-resolved'
-    _LOG.debug(f"Resolution of `{'`, `'.join(f'{k}->{v.name}' for k, v in new.items())}` for {t.name} produced {mode} `{ret.name}`.")
+    mode = f'still-generic-on-`{"`-`".join(still_generics)}`' if still_generics else 'fully-resolved'
+    nf = '`, `'.join(f'{k}->{v.name}' for k, v in new.items())
+    _LOG.debug(f"Resolution of `{nf}` for {t.name} produced {mode} `{ret.name}`.")
     return ret
-    
+
     # from .array import ARRAY_TYPE
     # if t == ARRAY_TYPE:
     #     name = all_params['T'].name + '[]'
@@ -210,6 +224,7 @@ class GenericType(ComposedType):
     class GenericParam(TypeBase):
         """A generic unresolved parameter type."""
         size: None = field(init=False, default=None)
+        is_builtin: ClassVar[bool] = field(init=False, default=False)  # type: ignore[misc]
 
         def __eq__(self, __value: object) -> bool:
             return isinstance(__value, GenericType.GenericParam)
@@ -222,46 +237,49 @@ class GenericType(ComposedType):
         ComposedType.__post_init__(self)
         object.__setattr__(self, '_name', self.name)
         if self.generic_params:
-            names = ','.join(v.name if k == v.name or not isinstance(v, GenericType.GenericParam) else f"{k}={v.name}" for k, v in self.generic_params.items())
+            names = ','.join(v.name if k == v.name or not isinstance(v, GenericType.GenericParam) else f"{k}={v.name}"
+                             for k, v in self.generic_params.items())
             object.__setattr__(self, 'name', f"{self.name}<{names}>")
 
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, GenericType):
             return False
-        
+
         # Ignore self.name in favor of self._name
-        ours = (self._name, self.size, self.reference_type, self.inherits, self.indexable, self.callable, self.members, self.readonly, self.special_operators)
-        theirs = (self._name, self.size, self.reference_type, self.inherits, self.indexable, self.callable, self.members, self.readonly, self.special_operators)
+        ours = (self._name, self.size, self.reference_type, self.inherits, self.indexable, self.callable, self.members,
+                self.readonly, self.special_operators)
+        theirs = (self._name, self.size, self.reference_type, self.inherits, self.indexable, self.callable,
+                  self.members, self.readonly, self.special_operators)
         if ours != theirs:
             return False
         return self.generic_params == __value.generic_params
 
-    def resolve_generic_instance(self,
-                                 params: dict[str, TypeBase] | None = None,
-                                 **kwargs: TypeBase) -> Self | ComposedType:
+    def resolve_generic_instance(self, params: dict[str, TypeBase] | None = None, **kwargs: TypeBase) -> Self:
         if params is None:
             params = {}
         else:
             params = dict(params)  # copy to make sure we're not modifying the original
         params.update(kwargs)
         assert params, f"Get resolve_generic_instance with nothing! ({params!r})"
-        return _rebuild_generic_type(self, params)
+        return cast(Self, _rebuild_generic_type(self, params))
 
     def is_generic_of(self, t: GenericParam) -> bool:
         return _is_generic_of(self, t)
-    
+
     def reverse_lookup(self, t: GenericParam) -> str:
         for k, v in self.generic_params.items():
             if t is v:
                 return k
         raise ValueError(f"Could not find `{t.name}` in `{self.name}`")
-    
+
     @classmethod
     def of(cls, t: TypeBase) -> 'GenericType':
-        return cls().resolve_generic_instance(T=t)
+        return cls().resolve_generic_instance(T=t)  # type: ignore[call-arg]
+
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class InterfaceType(GenericType):
     default_impls: set[str] = field(default_factory=set)
+
 
 __all__ = ('GenericType', 'InterfaceType')

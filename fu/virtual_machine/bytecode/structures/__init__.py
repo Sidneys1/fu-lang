@@ -4,11 +4,11 @@ from enum import Enum
 from io import BytesIO
 from typing import Generic, Iterator, NewType, Self, Sequence, TypeVar, Union
 
-from .. import BytecodeTypes, _encode_f32, _encode_u8, _encode_u32
+from .. import BytecodeTypes, _encode_f32, _encode_u8, int_u8, _encode_numeric, int_u32, float_f32
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class BytecodeBase(ABC):
+class BytecodeBase(ABC):  # type: ignore[misc]
     """Base class for all bytecode structures."""
 
     @classmethod
@@ -27,13 +27,13 @@ T = TypeVar('T', bound=BytecodeBase)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class BytecodeContainer(Generic[T], BytecodeBase, ABC):
+class BytecodeContainer(Generic[T], BytecodeBase, ABC):  # type: ignore[misc]
     """A simple bytecode type that just contains other types."""
     content: Sequence[T] = field(default_factory=list)
 
     def _encode(self) -> Iterator[T | BytecodeTypes]:
         print(f"encoding {type(self).__name__}: {len(self.content)}")
-        yield _encode_u32(len(self.content))
+        yield _encode_numeric(len(self.content), int_u32)
         yield from self.content
 
 
@@ -56,11 +56,11 @@ def _to_bytes(in_: Iterator[BytecodeTypes | BytecodeBase], silent=False) -> Iter
                 assert isinstance(val, int) and \
                     max(type(x)._value2member_map_.keys()) < 255 and \
                     min(type(x)._value2member_map_.keys()) >= 0  # noqa
-                yield _encode_u8(val)
+                yield _encode_numeric(val, int_u8)
             case int():
-                yield _encode_u8(x)
+                yield _encode_numeric(x, int_u8)
             case float():
-                yield _encode_f32(x)
+                yield _encode_numeric(x, float_f32)
             case bool():
                 yield b'\x01' if x else b'\x00'
             case _:

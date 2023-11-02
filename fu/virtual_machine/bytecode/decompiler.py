@@ -28,7 +28,7 @@ def _get_signature(func: BytecodeFunction, strings: bytes, types: list[BytecodeT
 def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator[str]:
     with BytesIO(bytecode) as stream:
         pos = stream.tell()
-        opcode = OpcodeEnum.RET
+        opcode: OpcodeEnum | None = OpcodeEnum.RET
         while True:
             last_opcode = opcode
             last_pos = pos

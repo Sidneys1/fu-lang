@@ -29,7 +29,7 @@ def _frame(frames: list[FrameInfo]) -> str:
 
 
 def render_error(error: CompilerNotice, indent: str = '', verbose: bool = False):
-    message_color = _COLOR_MAP.get(error.level.lower(), 45)
+    message_color = _COLOR_MAP.get(error.level, 45)
     if error.location is None:
         location = f" ({_frame(error._source)})" if verbose else ''
         print(f'  \033[{message_color}m', indent, f"{error.level.name}: {error.message}\033[0;2m{location}", sep='')

@@ -8,10 +8,11 @@ from . import TypeBase
 class IntegralType(TypeBase):
     """Supertype for certain value types: integrals, floats, etc."""
 
-    reference_type: ClassVar[bool] = False
-    inherits: tuple[Self] | None = field(init=None, default=())
-    indexable: ClassVar[None] = None
-    callable: ClassVar[None] = None
+    reference_type: ClassVar[bool] = False  # type: ignore[misc]
+    inherits: tuple[Self] | None = field(init=False, default=())  # type: ignore[assignment]
+    indexable: ClassVar[None] = None  # type: ignore[misc]
+    callable: ClassVar[None] = None  # type: ignore[misc]
+    is_builtin: bool = field(init=False, default=True)
 
     def could_hold_value(self, value: str) -> bool:
         return False
@@ -105,9 +106,10 @@ class EnumType(IntType):
     """Describes a type that is a set of scoped integral literals."""
     size: int = field(init=False)
     values: dict[str, int] = field(kw_only=False)
-    inherits: tuple[IntType] = field(default=())
+    inherits: tuple[IntType] = field(default=())  # type: ignore[assignment]
+    is_builtin: bool = field(default=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         TypeBase.__post_init__(self)
         if self.inherits == ():
             min_val = min(self.values.values())
@@ -126,5 +128,5 @@ class EnumType(IntType):
         object.__setattr__(self, 'size', self.inherits[0].size)
 
 
-BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U32_TYPE, ), signed=False)
+BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U32_TYPE, ), signed=False, is_builtin=True)
 """A special Enumeration type that inherits from u32 instead of u8 (as would be expected)."""

@@ -34,7 +34,7 @@ FAKE_CONVERSION_FLOAT_FLOAT_GOOD = """main: void(x: f16) = { y: f32 = x; };"""
 # FAKE_CONVERSION_INT_FLOAT = """main: void(x: u8) = { y: f16 = x; };"""  # Not implementedy
 
 FAKE_FILES = (
-    (FAKE_NAMESPACE, ..., ()), 
+    (FAKE_NAMESPACE, ..., ()),
     (FAKE_NAMESPACE_DUPE, "'main' already exists in <GLOBAL SCOPE>!", ()),
     (FAKE_TYPE, ..., ()),
     (FAKE_TYPE_EXISTS, "`foo` already defined.", ()),
@@ -43,23 +43,26 @@ FAKE_FILES = (
     (FAKE_TYPE_COMPLEX, ..., ()),
     (FAKE_TYPE_SUBTYPE, ..., ()),
     (FAKE_TYPE_CTOR, ..., ()),
-    (FAKE_TYPE_UNASSIGNED, ..., ("Type `foo` has uninitialized members: `x`. Consider adding a constructor?", )),
+    (FAKE_TYPE_UNASSIGNED, ..., ("Constructor for `foo` does not initialize members `x`.", )),
     (FAKE_TYPE_ASSIGNED, ..., ()),
     (FAKE_TYPE_CTOR_RETURN, ..., ("Returning values not allowed in a constructor!", )),
     (FAKE_DECL, ..., ()),
-    (FAKE_DECL_SHADOWS, ..., ("Declaration of 'x' shadows previous declaration.", "'x' is shadowing an existing identifier!")),
-    (FAKE_DECL_CONVERSION, ..., ("Narrowing when implicitly converting from a `usize_t` (64bit unsigned) to a `u8` (8bit unsigned).", )),
+    (FAKE_DECL_SHADOWS, ..., ("Declaration of 'x' shadows previous declaration.",
+                              "'x' is shadowing an existing identifier!")),
+    (FAKE_DECL_CONVERSION, ...,
+     ("Narrowing when implicitly converting from a `usize_t` (64bit unsigned) to a `u8` (8bit unsigned).", )),
     (FAKE_DECL_TYPES, ..., ()),
     (FAKE_DECL_STATEMENT, ..., ()),
     (FAKE_DECL_REDECL, ..., ("Redefinition of 'x'.", )),
-    (FAKE_DECL_BADBODY, "`x: i8` is not callable but is initialized with a body.",  ()),
+    (FAKE_DECL_BADBODY, "`x: i8` is not callable but is initialized with a body.", ()),
     (FAKE_DECL_EMPTY_BODY, ..., ("Method initialized with an empty body.", )),
     (FAKE_CONVERSION_VOID, ..., ("There are no conversions to or from void.", )),
     # (FAKE_CONVERSION_BOOL, ..., ()),
     (FAKE_CONVERSION_FLOAT_INT, ..., ("Loss of precision converting from a `f32` to a `u8`.", )),
-    (FAKE_CONVERSION_FLOAT_FLOAT_BAD, ..., ("Loss of floating point precision converting from a `f32` to a `f16`.",)),
+    (FAKE_CONVERSION_FLOAT_FLOAT_BAD, ..., ("Loss of floating point precision converting from a `f32` to a `f16`.", )),
     (FAKE_CONVERSION_FLOAT_FLOAT_GOOD, ..., ()),
 )
+
 
 @mark.parametrize('content,expect,warnings', FAKE_FILES)
 def test_analysis(global_scope, content, expect, warnings):
