@@ -46,9 +46,6 @@ def _check_infix_operator(element: Operator) -> Iterator[CompilerNotice]:
     yield from _check(element.lhs)
     yield from _check(element.rhs)
     match element.oper.value:
-        case '+':
-            # input(f"{element.lhs} + {element.rhs}")
-            ...
         case _:
             yield CompilerNotice('Note', f"Checks for infix operator {element.oper.value!r} are not implemented!",
                                  element.location)

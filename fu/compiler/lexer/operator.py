@@ -167,7 +167,7 @@ class Operator(Lex):
         elif (lhs := Atom.try_lex(stream)) is None:
             _LOG.warn("%sLeft-hand side was not an Atom", 'x ' * stream.depth)
             return None
-
+        _LOG.debug(f"Lhs is {lhs}")
         while True:
             oper = stream.peek()
             if oper is None:

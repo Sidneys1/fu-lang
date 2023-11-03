@@ -52,7 +52,7 @@ FAKE_FILES = (
     (FAKE_DECL_CONVERSION, ...,
      ("Narrowing when implicitly converting from a `usize_t` (64bit unsigned) to a `u8` (8bit unsigned).", )),
     (FAKE_DECL_TYPES, ..., ()),
-    (FAKE_DECL_STATEMENT, ..., ()),
+    (FAKE_DECL_STATEMENT, ..., ("Checks for infix operator '+' are not implemented!", )),
     (FAKE_DECL_REDECL, ..., ("Redefinition of 'x'.", )),
     (FAKE_DECL_BADBODY, "`x: i8` is not callable but is initialized with a body.", ()),
     (FAKE_DECL_EMPTY_BODY, ..., ("Method initialized with an empty body.", )),

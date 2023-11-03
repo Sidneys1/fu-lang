@@ -162,6 +162,9 @@ class Token:
                         # surround.append(Token(buffer, TokenType.Comment, _pos(start_pos, end_pos)))
                         start_pos = end_pos
                         continue
+                    yield Token('/', TokenType.Operator, _pos(start_pos, stream.position))
+                    start_pos = stream.position
+                    continue
                 # elif char == '\\' and not stream.eof:
                 #     # Skip next character entirely. If it's a carriage return, also ignore newline (Windows encoding)
                 #     if stream.pop() == '\r' and stream.peek() == '\n':

@@ -235,6 +235,9 @@ class StorageDescriptor:
     type: TypeBase
     slot: int | None = None
 
+    def __post_init__(self) -> None:
+        assert isinstance(self.type, TypeBase)
+
 
 @dataclass(slots=True)
 class TempSourceMap:
@@ -265,8 +268,12 @@ def retrieve(from_: StorageDescriptor, buffer: BytesIO, loc: SourceLocation) -> 
         return from_
     match from_:
         case StorageDescriptor(storage=Storage.Arguments) if from_.slot is not None:
-            # The thing we're trying to retrieve is in the current method's args, and it's a ref-type.
+            # The thing we're trying to retrieve is in the current method's args.
             write_to_buffer(buffer, OpcodeEnum.PUSH_ARG, _encode_numeric(from_.slot, int_u8))
+            return StorageDescriptor(Storage.Stack, from_.type)
+        case StorageDescriptor(storage=Storage.Locals) if from_.slot is not None:
+            # The thing we're trying to retrieve is in the current method's locals.
+            write_to_buffer(buffer, OpcodeEnum.PUSH_LOCAL, _encode_numeric(from_.slot, int_u8))
             return StorageDescriptor(Storage.Stack, from_.type)
     raise CompilerNotice('Critical', f"Don't know how to get {from_.type.name} out of {from_.storage.name}", loc)
 
@@ -274,20 +281,26 @@ def retrieve(from_: StorageDescriptor, buffer: BytesIO, loc: SourceLocation) -> 
 def compile_expression(expression: Lex,
                        buffer: BytesIO,
                        want: TypeBase | None = None) -> Generator[TempSourceMap, None, StorageDescriptor]:
-    _LOG.debug(f'Compiling expression: {str(expression).strip()}')
+    _LOG.debug(f'Compiling expression: {str(expression).strip()} (want: `{want.name if want is not None else want}`)')
     scope = CompileScope.current()
     start = buffer.tell()
     match expression:
         case LexedLiteral():
             value = expression.to_value()
-            match value:
-                case int():
-                    if isinstance(want, IntType):
-                        # input('literal')
-                        write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL_u8, _encode_numeric(value, int_u8))
-                        return StorageDescriptor(Storage.Stack, U8_TYPE)
-                case _:
+            match value, want:
+                case int(), None:
+                    # TODO: best int type for literal
                     pass
+                case int(), _ if want == U8_TYPE:
+                    #input(f"{want.name} -> {U8_TYPE.name}")
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.u8, _encode_numeric(value, int_u8))
+                    return StorageDescriptor(Storage.Stack, U8_TYPE)
+                case int(), _ if want == U32_TYPE:
+                    #input(f"{want.name} -> {U8_TYPE.name}")
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.u32, _encode_numeric(value, int_u32))
+                    return StorageDescriptor(Storage.Stack, U32_TYPE)
+                case int(), IntType():
+                    raise NotImplementedError(f"Unknown inttype `{want.name}`.")
             raise NotImplementedError(f"Don't know how to handle {type(value).__name__} literals.")
         case Operator(oper=Token(type=TokenType.Equals), lhs=Identifier(), rhs=Lex()):
             assert isinstance(expression.lhs, Identifier)
@@ -386,6 +399,61 @@ def compile_expression(expression: Lex,
                 # yield TempSourceMap(start, buffer.tell() - start, expression.location)
                 # return StorageDescriptor(Storage.Stack, make_ref(slot_type) if slot_type.reference_type else slot_type)
             raise NotImplementedError()
+        case Operator(oper=Token(type=TokenType.Operator), lhs=Lex(), rhs=Lex()):
+            # Misc infix operator
+            if expression.oper.value in ('+', '-', '*', '/'):
+                # Awesome, addition! Let's see what types lhs and rhs are
+                lhs_storage = yield from compile_expression(expression.lhs, buffer)
+                lhs_storage = retrieve(lhs_storage, buffer, expression.lhs.location)
+
+                rhs_storage = yield from compile_expression(expression.rhs, buffer)
+                rhs_storage = retrieve(rhs_storage, buffer, expression.rhs.location)
+                # Let's check types...
+                match lhs_storage.type, rhs_storage.type:
+                    case _, EnumType() | EnumType(), _:
+                        raise NotImplementedError("Don't know how to add enums!")
+                    case IntegralType(), FloatType() | FloatType(), IntegralType():
+                        raise NotImplementedError("Result will be a float...")
+                    case IntType(), IntType():
+                        bittness = max(lhs_storage.type.size, rhs_storage.type.size)
+                        signedness = lhs_storage.type.signed or rhs_storage.type.signed
+                        match bittness, signedness:
+                            case 8, False:
+                                r_type, t_type = NumericTypes.u64, U64_TYPE
+                            case 8, True:
+                                r_type, t_type = NumericTypes.i64, I64_TYPE
+                            case 4, False:
+                                r_type, t_type = NumericTypes.u32, U32_TYPE
+                            case 4, True:
+                                r_type, t_type = NumericTypes.i32, I32_TYPE
+                            case 2, False:
+                                r_type, t_type = NumericTypes.u16, U16_TYPE
+                            case 2, True:
+                                r_type, t_type = NumericTypes.i16, I16_TYPE
+                            case 1, False:
+                                r_type, t_type = NumericTypes.u8, U8_TYPE
+                            case 1, True:
+                                r_type, t_type = NumericTypes.i8, I8_TYPE
+                            case _:
+                                raise NotImplementedError()
+
+                        write_to_buffer(
+                            buffer, {
+                                '+': OpcodeEnum.CHECKED_ADD,
+                                '-': OpcodeEnum.CHECKED_SUB,
+                                '*': OpcodeEnum.CHECKED_MUL,
+                                '/': OpcodeEnum.CHECKED_IDIV,
+                            }[expression.oper.value], r_type)
+                        _LOG.debug(
+                            f"Adding two ints... `{lhs_storage.type.name} + {rhs_storage.type.name} = {t_type.name}`")
+                        return StorageDescriptor(Storage.Stack, t_type)
+                        # raise NotImplementedError(
+                        #     f"Result will be an int... -> {want.name if want is not None else None}")
+                    case _, _:
+                        raise NotImplementedError(
+                            f"Don't know how to add {lhs_storage.type.name} and {rhs_storage.type.name}")
+            else:
+                raise NotImplementedError(f"Don't support infix Operator {expression.oper.value!r}")
         case Identifier():
             name = expression.value
             storage_type = _storage_type_of(name, expression.location)
@@ -420,13 +488,19 @@ def convert_to_stack(from_: StorageDescriptor,
             case _:
                 raise NotImplementedError()
     match from_.type, to_:
-        case (IntType(), IntType()) | (FloatType(), IntType()):
-            assert isinstance(to_, IntType)
+        case IntType(), IntType():
+            write_to_buffer(buffer, OpcodeEnum.CHECKED_CONVERT if checked else OpcodeEnum.UNCHECKED_CONVERT,
+                            NumericTypes.from_int_type(to_).value)
+            return
+        case FloatType(), IntType():
             write_to_buffer(buffer, OpcodeEnum.CHECKED_CONVERT if checked else OpcodeEnum.UNCHECKED_CONVERT,
                             NumericTypes.from_int_type(to_).value)
             return
         case _:
-            raise CompilerNotice('Error', f"Not sure how to convert from `{from_.type.name}` to `{to_.name}`.", loc)
+            raise CompilerNotice(
+                'Error',
+                f"Not sure how to convert from `{from_.type.name}` ({type(from_.type).__name__}) on the {from_.storage.name} to `{to_.name}`.",
+                loc)
 
 
 def compile_statement(statement: Statement | Declaration | ReturnStatement, buffer: BytesIO) -> Iterator[TempSourceMap]:
@@ -442,7 +516,7 @@ def compile_statement(statement: Statement | Declaration | ReturnStatement, buff
             assert fn_scope is not None
             local_type = fn_scope.decls[name]
 
-            value_storage = yield from compile_expression(statement.initial, buffer)
+            value_storage = yield from compile_expression(statement.initial, buffer, local_type)
             convert_to_stack(value_storage, local_type, buffer, statement.initial.location)
             write_to_buffer(buffer, OpcodeEnum.INIT_LOCAL)
             fn_scope.locals[name] = local_type
@@ -454,10 +528,10 @@ def compile_statement(statement: Statement | Declaration | ReturnStatement, buff
             yield TempSourceMap(start, buffer.tell() - start, statement.location)
         case ReturnStatement():
             if statement.value is not None:
-                return_storage = yield from compile_expression(statement.value, buffer)
-                _LOG.debug(f"...return_storage is {return_storage}")
                 assert fn_scope is not None
                 fn_ret = fn_scope.returns
+                return_storage = yield from compile_expression(statement.value, buffer, want=fn_ret)
+                _LOG.debug(f"...return_storage is {return_storage}")
                 convert_to_stack(return_storage, fn_ret, buffer, statement.value.location)
             write_to_buffer(buffer, OpcodeEnum.RET)
             yield TempSourceMap(start, buffer.tell() - start, statement.location)
@@ -543,9 +617,9 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
     signature = _BUILDER.add_type_type(func.type)
     address = _BUILDER.add_code(code)
 
-    for loc in source_locs:
-        _BUILDER.add_source_map(loc.location, (loc.offset + address, loc.length))
+    # for loc in source_locs:
+    #     _BUILDER.add_source_map(loc.location, (loc.offset + address, loc.length))
 
-    _BUILDER.add_source_map(func.location, (address, len(code)))
+    # _BUILDER.add_source_map(func.location, (address, len(code)))
 
     return BytecodeFunction(name, scope, signature, address)

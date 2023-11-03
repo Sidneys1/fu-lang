@@ -142,7 +142,6 @@ def main(*args) -> int:
         try:
             vm.run()
         except VM.VmTerminated as ex:
-            print(f'% VM terminated with {ex.exit_code}')
             return ex.exit_code
 
     return 0
