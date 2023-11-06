@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable
 
-from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, FloatType, IntType, TypeBase
+from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, FloatType, IntType, TypeBase
 from ...types.integral_types import IntegralType
 from .. import CompilerNotice
 from ..lexer import ExpList, Identifier, Lex, Operator, ReturnStatement, StaticScope, Token, TokenType, Type_
@@ -132,14 +132,28 @@ def resolve_type(element: Lex,
 
             # input(f"\n\n{lhs_type.name} {element.oper.value} {rhs_type.name}")
             match lhs_type, rhs_type:
+                case FloatType(), FloatType():
+                    assert isinstance(lhs_type, FloatType) and isinstance(rhs_type, FloatType)
+                    oper_name = {
+                        '+': 'addition',
+                        '-': 'subtraction',
+                        '*': 'multiplication',
+                        '/': 'division'
+                    }.get(element.oper.value, element.oper.value)
+                    if lhs_type.size != rhs_type.size:
+                        warn(
+                            CompilerNotice(
+                                'Warning',
+                                f"Performing `{oper_name}` between floating point types of different size can result in inforation loss.",
+                                element.location))
+                    return max((x for x in (lhs_type, rhs_type)), key=lambda x: x.size or 0)
                 case IntType(), IntType():
                     assert isinstance(lhs_type, IntType) and isinstance(rhs_type, IntType)
                     oper_name = {
                         '+': 'addition',
                         '-': 'subtraction',
                         '*': 'multiplication',
-                        '/': 'division',
-                        '!': 'inversion'
+                        '/': 'division'
                     }.get(element.oper.value, element.oper.value)
                     if lhs_type.signed != rhs_type.signed or lhs_type.size != rhs_type.size:
                         warn(
@@ -169,6 +183,16 @@ def resolve_type(element: Lex,
                     return STR_TYPE
                 case TokenType.Number:
                     # TODO: determine actual type of literal
+                    if element.value.endswith('f'):
+                        val = float(element.value[:-1])
+                        if want is not None and isinstance(want, IntegralType) and want.could_hold_value(int(val)):
+                            return want.as_const()
+                        return F32_TYPE.as_const()
+                    if 'f' in element.value or '.' in element.value:
+                        raise NotImplementedError()
+                    if 'i' in element.value:
+                        raise NotImplementedError()
+                    # Bare Integer
                     if want is not None and isinstance(want, IntegralType) and want.could_hold_value(element.value):
                         return want.as_const()
                     return SIZE_TYPE.as_const() if want_signed or element.value[0] == '-' else USIZE_TYPE.as_const()

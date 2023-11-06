@@ -288,6 +288,13 @@ def compile_expression(expression: Lex,
         case LexedLiteral():
             value = expression.to_value()
             match value, want:
+                case float(), None:
+                    # TODO: best float type for literal
+                    pass
+                case float(), _ if want == F32_TYPE:
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.f32,
+                                    _encode_numeric(value, float_f32))
+                    return StorageDescriptor(Storage.Stack, F32_TYPE)
                 case int(), None:
                     # TODO: best int type for literal
                     pass
@@ -301,7 +308,9 @@ def compile_expression(expression: Lex,
                     return StorageDescriptor(Storage.Stack, U32_TYPE)
                 case int(), IntType():
                     raise NotImplementedError(f"Unknown inttype `{want.name}`.")
-            raise NotImplementedError(f"Don't know how to handle {type(value).__name__} literals.")
+            raise NotImplementedError(
+                f"Don't know how to handle {type(value).__name__} literals (want={want.name if want is not None else None})."
+            )
         case Operator(oper=Token(type=TokenType.Equals), lhs=Identifier(), rhs=Lex()):
             assert isinstance(expression.lhs, Identifier)
             assert expression.rhs is not None
@@ -414,6 +423,27 @@ def compile_expression(expression: Lex,
                         raise NotImplementedError("Don't know how to add enums!")
                     case IntegralType(), FloatType() | FloatType(), IntegralType():
                         raise NotImplementedError("Result will be a float...")
+                    case FloatType(), FloatType():
+                        bittness = max(lhs_storage.type.size, rhs_storage.type.size)
+                        match bittness:
+                            case 2:
+                                r_type, t_type = NumericTypes.f16, F16_TYPE
+                            case 4:
+                                r_type, t_type = NumericTypes.f32, F32_TYPE
+                            case 8:
+                                r_type, t_type = NumericTypes.f64, F64_TYPE
+                            case _:
+                                raise NotImplementedError()
+                        write_to_buffer(
+                            buffer, {
+                                '+': OpcodeEnum.CHECKED_ADD,
+                                '-': OpcodeEnum.CHECKED_SUB,
+                                '*': OpcodeEnum.CHECKED_MUL,
+                                '/': OpcodeEnum.CHECKED_FDIV,
+                            }[expression.oper.value], r_type)
+                        _LOG.debug(
+                            f"Adding two floats... `{lhs_storage.type.name} + {rhs_storage.type.name} = {t_type.name}`")
+                        return StorageDescriptor(Storage.Stack, t_type)
                     case IntType(), IntType():
                         bittness = max(lhs_storage.type.size, rhs_storage.type.size)
                         signedness = lhs_storage.type.signed or rhs_storage.type.signed

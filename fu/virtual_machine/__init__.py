@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 from inspect import isclass
 from time import perf_counter
-from operator import add, sub, mul, floordiv
+from operator import add, sub, mul, floordiv, truediv
 
 from ..types.integral_types import FloatType, IntType
 from .bytecode import NumericTypes, OpcodeEnum, ParamType, getLogger
@@ -164,6 +164,7 @@ class VM:
                     if not isinstance(val, (int, float)) or min > val > max:
                         # todo: exceptions
                         raise RuntimeError(f"Checked numeric conversion from '{val!r}' to `{to.name}` failed")
+                    val = int(val)
                 case _:
                     raise NotImplementedError()
             stack_frame.stack.append(val)
@@ -194,7 +195,8 @@ class VM:
             value = self._get_slot_of(self.heap[ref.value], index + 1)
             stack_frame.stack.append(value)
             self.ip += length
-        elif op in (OpcodeEnum.CHECKED_ADD, OpcodeEnum.CHECKED_SUB, OpcodeEnum.CHECKED_MUL, OpcodeEnum.CHECKED_IDIV):
+        elif op in (OpcodeEnum.CHECKED_ADD, OpcodeEnum.CHECKED_SUB, OpcodeEnum.CHECKED_MUL, OpcodeEnum.CHECKED_IDIV,
+                    OpcodeEnum.CHECKED_FDIV):
             rhs = stack_frame.stack.pop()
             lhs = stack_frame.stack.pop()
             type_ = params[0]
@@ -205,13 +207,14 @@ class VM:
                 OpcodeEnum.CHECKED_ADD: add,
                 OpcodeEnum.CHECKED_SUB: sub,
                 OpcodeEnum.CHECKED_MUL: mul,
-                OpcodeEnum.CHECKED_IDIV: floordiv
+                OpcodeEnum.CHECKED_IDIV: floordiv,
+                OpcodeEnum.CHECKED_FDIV: truediv,
             }[op](lhs, rhs)
-            assert isinstance(n_type, IntType)
-            min_, max_ = n_type.range()
-            if min_ > val > max_:
-                # TODO: checked exception
-                pass
+            if isinstance(n_type, IntType):
+                min_, max_ = n_type.range()
+                if min_ > val > max_:
+                    # TODO: checked exception
+                    pass
             stack_frame.stack.append(val)
             self.ip += length
         else:

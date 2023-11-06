@@ -85,6 +85,9 @@ _NUMERIC_CODERS = {
     int_i16: (_encode_i16, _decode_i16),
     int_i32: (_encode_i32, _decode_i32),
     int_i64: (_encode_i64, _decode_i64),
+    float_f16: (_encode_f16, _decode_f16),
+    float_f32: (_encode_f32, _decode_f32),
+    float_f64: (_encode_f64, _decode_f64),
 }
 
 
@@ -144,6 +147,8 @@ class NumericTypes(Enum):
                 return I32_TYPE
             case self.u32:
                 return U32_TYPE
+            case self.f32:
+                return F32_TYPE
             case _:
                 raise NotImplementedError(f"{self.name}")
 
@@ -284,6 +289,8 @@ class OpcodeEnum(Enum):
     CHECKED_MUL = auto(), 'mul.{0.name}', 'pop two, multiply into `{0.name}` (checked), push', ParamType.NumericType
     CHECKED_IDIV = auto(
     ), 'idiv.{0.name}', 'pop two, integer divide into `{0.name}` (checked), push', ParamType.NumericType
+    CHECKED_FDIV = auto(
+    ), 'fdiv.{0.name}', 'pop two, float divide into `{0.name}` (checked), push', ParamType.NumericType
 
 
 _FRIENDLY_OPCODE_NAMES: dict[OpcodeEnum, str] = {}
