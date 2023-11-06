@@ -19,29 +19,17 @@ class ParsedArgs(Protocol):
     run: bool
     verbose: bool
     check_only: bool
-    files: list[Path] | None
-    root: list[Path]
+    input: Path
     std: Path
+    args: list[str]
 
     @staticmethod
-    def parse_files(string: str) -> Path:
+    def parse_input_path(string: str) -> Path:
         ret = Path(string).absolute()
-        if not ret.is_file():
-            raise ArgumentError(None, f"`{ret}` is not a file.")
-        cwd = Path.cwd()
-        if cwd != ret and cwd not in ret.parents:
-            raise ArgumentError(None, f"`{ret}` is not in any subdirectory of current working directory `{cwd}`.")
-        return ret  #.relative_to(cwd)
-
-    @staticmethod
-    def parse_root_path(string: str) -> Path:
-        ret = Path(string).absolute()
-        if not ret.is_dir():
-            raise ArgumentError(None, f"`{ret}` is not a directory.")
         cwd = Path.cwd()
         if cwd != ret and cwd not in ret.parents:
             raise ArgumentError(None, f"`{ret}` is not a subdirectory of current working directory `{cwd}`.")
-        return ret.relative_to(cwd)
+        return ret
 
     @staticmethod
     def parse_std_path(string: str) -> Path:
@@ -58,33 +46,29 @@ def main(*args) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--check-only', help="Stop after checking.", action='store_true')
     group.add_argument('-r', '--run', help="Compile and run.", action='store_true')
+
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--std',
-                        metavar='STD',
+                        metavar='STD_PATH',
                         type=ParsedArgs.parse_std_path,
                         help="Path to the standard library (default: `%(default)s`).",
                         default=DEFAULT_STD_ROOT)
-    positional = parser.add_mutually_exclusive_group(required=True)
-    positional.add_argument('-f',
-                            '--files',
-                            metavar='FILE',
-                            nargs='+',
-                            type=ParsedArgs.parse_files,
-                            help='Compile theses pecific source files. Mutually exclusive with `DIR`.')
-    positional.add_argument(
-        'root',
-        metavar='DIR',
-        nargs='*',
-        type=ParsedArgs.parse_root_path,
+    parser.add_argument('input',
+        metavar='PATH',
+        type=ParsedArgs.parse_input_path,
         help=
-        'Compile source files found under this directory (default: `%(default)s`). Mutually exclusive with `--files`.',
+        'Compile source file specified, or files found under a directory (default: `%(default)s`).',
         default='.' + pathsep)
+    parser.add_argument('args',
+        metavar='ARG',
+        nargs='*',
+        help=
+        'Command line arguments (for use with `--run`).')
     ns: ParsedArgs
-    ns, unknown_args = parser.parse_known_args(args)  # type: ignore
+    ns = parser.parse_args(args)  # type: ignore
 
     if ns.verbose:
         basicConfig(level=DEBUG)
-        _LOG.debug(f"Files: {ns.files}; Dirs: {ns.root}")
     else:
         getLogger(__package__ + ".lexer").setLevel(level=ERROR)
         basicConfig(level=INFO)
@@ -92,12 +76,10 @@ def main(*args) -> int:
     global_scope = AnalyzerScope(None, AnalyzerScope.Type.Anonymous)
     with set_global_scope(global_scope):
         docs: list[Document] = list(load_std(ns.std))
-        if ns.files is None:
-            for root in ns.root:
-                docs.extend(discover_files(root))
+        if ns.input.is_dir():
+            docs.extend(discover_files(ns.input))
         else:
-            for f in ns.files:
-                docs.append(parse_file(f))
+            docs.append(parse_file(ns.input))
         errors = list(check_program(docs))
 
         if not ns.check_only and all(error.level.lower() not in ('error', 'critical') for error in errors):
@@ -138,7 +120,7 @@ def main(*args) -> int:
             return -1
 
         from ..virtual_machine import VM
-        vm = VM(binary, unknown_args)
+        vm = VM(binary, ns.args)
         try:
             vm.run()
         except VM.VmTerminated as ex:

@@ -92,37 +92,17 @@ class Declaration(Lex):
     """Declaration: Identity [ '=' Expression | Scope ];"""
     identity: Identity | SpecialOperatorIdentity
     initial: Union['Scope', 'Expression', ExpList, None] = None
+    is_fat_arrow: bool = False
 
     def to_code(self) -> Iterable[str]:
         yield from self.identity.to_code()
         if self.initial is not None:
-            yield ' = '
+            yield ' = ' if not self.is_fat_arrow else ' => '
             yield from self.initial.to_code()
         yield ';'
 
-    # metadata: MetadataList | None = None
-
-    # def __str__(self) -> str:
-    #     from . import Scope, Statement
-    #     if self.identity is not None and self.identity.rhs == 'namespace' and isinstance(self.initial, Scope) and len(
-    #             self.initial.content) == 1 and isinstance(self.initial.content[0], Statement) and isinstance(
-    #                 self.initial.content[0].value,
-    #                 Declaration) and self.initial.content[0].value.identity.rhs == 'namespace':
-    #         return f"{self.identity.lhs}.{self.initial.content[0].value}"
-
-    #     build = ''
-
-    #     # if self.metadata:
-    #     #     build += f"[{self.metadata}]\n{_tab()}"
-
-    #     build += str(self.identity)
-
-    #     if self.initial is not None:
-    #         build += f" = {self.initial}"
-    #     return build + ';\n'
-
     def __repr__(self) -> str:
-        after = '' if self.initial is None else f'={self.initial!r}'
+        after = '' if self.initial is None else f'{"=>" if self.is_fat_arrow else "="}{self.initial!r}'
         return f"Declaration<{self.identity!r}{after}>"
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
@@ -243,22 +223,35 @@ class Declaration(Lex):
                 generic_mod,
                 location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
-        if (tok := stream.peek()) is not None and tok.type == TokenType.Equals:
-            raw.append(stream.pop())
-            if (tok := stream.peek()) is not None and tok.type == TokenType.LParen:
+        is_fat_arrow = False
+        if (tok := stream.peek()) is not None:
+            if tok.type == TokenType.Equals:
                 raw.append(stream.pop())
-                exp_list = ExpList.try_lex(stream)
-                if exp_list is None:
-                    raise LexError("Expected an `ExpList`!")
-                raw.append(exp_list)
-                raw.append(stream.expect(TokenType.RParen))
-                initial = exp_list
-            elif (initial := (Scope.try_lex(stream) or Expression.try_lex(stream))) is None:
-                raise LexError("Expected a `Scope` or `Expression`!")
-            else:
-                raw.append(initial)
+                if (tok := stream.peek()) is not None and tok.type == TokenType.LParen:
+                    raw.append(stream.pop())
+                    exp_list = ExpList.try_lex(stream)
+                    if exp_list is None:
+                        raise LexError("Expected an `ExpList`!")
+                    raw.append(exp_list)
+                    raw.append(stream.expect(TokenType.RParen))
+                    initial = exp_list
+                elif (initial := (Scope.try_lex(stream) or Expression.try_lex(stream))) is None:
+                    raise LexError("Expected a `Scope` or `Expression`!")
+                else:
+                    raw.append(initial)
+            elif tok.type == TokenType.FatArrow:
+                is_fat_arrow = True
+                raw.append(stream.pop())
+                if (initial := Expression.try_lex(stream)) is None:
+                    raise LexError("Expected a `Scope` or `Expression`!")
+                else:
+                    raw.append(initial)
 
         raw.append(tok := stream.expect(TokenType.Semicolon))
 
-        ret = Declaration(raw, identity, initial, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+        ret = Declaration(raw,
+                          identity,
+                          initial,
+                          is_fat_arrow=is_fat_arrow,
+                          location=SourceLocation.from_to(raw[0].location, raw[-1].location))
         return ret

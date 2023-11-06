@@ -3,7 +3,8 @@ from logging import getLogger
 
 from ....types import ThisType
 from ... import CompilerNotice
-from ...lexer import CompilerNotice, Declaration, Identity, ParamList, Scope, Type_
+from ...lexer import (CompilerNotice, Declaration, Identity, ParamList, Scope, Type_, Expression, Operator, Atom,
+                      LexedLiteral, Identifier)
 from .. import _mark_checked_recursive
 from .._populate import _populate
 from ..scope import AnalyzerScope
@@ -39,37 +40,48 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
 
     _mark_checked_recursive(element.identity)
 
-    if element.initial is not None:
+    if element.initial is None:
+        return
+
+    try:
+        lhs_type = type_from_lex(element.identity.rhs, scope)
+    except CompilerNotice as ex:
+        yield ex
+        return
+
+    if (not element.is_fat_arrow) and (not isinstance(element.initial, Scope)):
+        # Not fat arrow and not a scope -> static assignment (not callable)
+        yield from _check(element.initial)
+        return
+
+    assert isinstance(element.initial,
+                      (Scope, Expression, Operator, Atom, LexedLiteral,
+                       Identifier)), f"element.initial is unexpectedly a `{type(element.initial).__name__}`"
+
+    if lhs_type.callable is None:
+        raise CompilerNotice("Error", f"`{element.identity}` is not callable but is initialized with a body.",
+                             element.identity.location)
+
+    if isinstance(element.initial, Scope) and not element.initial.content:
+        yield CompilerNotice('Warning', "Method initialized with an empty body.", element.initial.location)
+
+    params = element.identity.rhs.mods[-1]
+    assert isinstance(params, ParamList)
+    assert all(not isinstance(p, Type_) or p.ident.value == 'this' for p in params.params)
+    props = {
+        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
+        for p in params.params if isinstance(p, Identity)
+    }
+    # if element.is_fat_arrow:
+    #     input(props)
+    with AnalyzerScope.new(element.identity.lhs.value,
+                           AnalyzerScope.Type.Function,
+                           vars=props,
+                           return_type=StaticVariableDecl(lhs_type.callable[1], element)):
         try:
-            lhs_type = type_from_lex(element.identity.rhs, scope)
+            if isinstance(element.initial, Scope):
+                yield from _populate(element.initial)
+            # TODO type check return
+            yield from _check(element.initial)
         except CompilerNotice as ex:
             yield ex
-            return
-        if not isinstance(element.initial, Scope):
-            yield from _check(element.initial)
-            return
-
-        if lhs_type.callable is None:
-            raise CompilerNotice("Error", f"`{element.identity}` is not callable but is initialized with a body.",
-                                 element.identity.location)
-        elif not element.initial.content:
-            yield CompilerNotice('Warning', "Method initialized with an empty body.", element.initial.location)
-
-        params = element.identity.rhs.mods[-1]
-        assert isinstance(params, ParamList)
-        assert all(not isinstance(p, Type_) or p.ident.value == 'this' for p in params.params)
-        props = {
-            p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
-            for p in params.params if isinstance(p, Identity)
-        }
-
-        with AnalyzerScope.new(element.identity.lhs.value,
-                               AnalyzerScope.Type.Function,
-                               vars=props,
-                               return_type=StaticVariableDecl(lhs_type.callable[1], element)):
-            try:
-                yield from _populate(element.initial)
-                # TODO type check return
-                yield from _check(element.initial)
-            except CompilerNotice as ex:
-                yield ex

@@ -16,7 +16,7 @@ def test_regression(file: Path):
     expected_stderr_file = (file / '..' / 'output' / (file.name + '.stderr')).resolve()
     assert expected_stderr_file.is_file()
     assert expected_stdout_file.is_file()
-    with Popen([executable, '-m', 'fu.compiler', '-f', str(file.absolute())], stdout=PIPE, stderr=PIPE,
+    with Popen([executable, '-m', 'fu.compiler', str(file.absolute())], stdout=PIPE, stderr=PIPE,
                cwd=str(ROOT)) as compiler:
         stdout, stderr = compiler.communicate(timeout=10.0)
 

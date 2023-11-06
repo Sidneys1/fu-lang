@@ -44,7 +44,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
                         fqdn, name = _get_fqdn(func, binary.strings)
                         fqdn = (fqdn + '.' + name) if fqdn else name
                         sig = _get_signature(func, binary.strings, binary.types)
-                        yield f"       |                        | {fqdn + ':':<14} ; {name}: {sig} = {{ /* ... */ }}"
+                        yield f"       |                   | {fqdn + ':':<17} ; {name}: {sig} = {{ /* ... */ }}"
 
             asm, explain = opcode.as_asm(*args)
             hex_bytes = ' '.join(f'{x:02x}' for x in raw)

@@ -39,6 +39,7 @@ class TokenType(Enum):
     Dot = '.'
     LessThan = '<'
     GreaterThan = '>'
+    FatArrow = '=>'
 
     # Keywords
     ReturnKeyword = 'return'
@@ -165,10 +166,6 @@ class Token:
                     yield Token('/', TokenType.Operator, _pos(start_pos, stream.position))
                     start_pos = stream.position
                     continue
-                # elif char == '\\' and not stream.eof:
-                #     # Skip next character entirely. If it's a carriage return, also ignore newline (Windows encoding)
-                #     if stream.pop() == '\r' and stream.peek() == '\n':
-                #         stream.pop()
                 elif char == '"':
                     # Some string, let's build up a buffer.
                     buffer = ''
@@ -183,7 +180,12 @@ class Token:
                     start_pos = npos
                     continue
                 elif (tt := TOKEN_REVERSE_MAP.get(char, None)) is not None:
-                    yield Token(char, tt, _pos(start_pos, start_pos))
+                    if tt == TokenType.Equals and stream.peek() == '>':
+                        start_pos = stream.position
+                        char = stream.pop()
+                        tt = TokenType.FatArrow
+                        char = '=>'
+                    yield Token(char, tt, _pos(start_pos, stream.position))
                 elif char in TokenType.Operator.value:
                     yield Token(char, TokenType.Operator, _pos(start_pos, start_pos))
                 elif char in WORD_START:

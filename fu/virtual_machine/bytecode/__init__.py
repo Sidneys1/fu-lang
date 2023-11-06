@@ -149,6 +149,8 @@ class NumericTypes(Enum):
                 return U32_TYPE
             case self.f32:
                 return F32_TYPE
+            case self.u64:
+                return U64_TYPE
             case _:
                 raise NotImplementedError(f"{self.name}")
 

@@ -162,7 +162,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 yield ex
                 return
 
-            if element.initial is not None and not isinstance(element.initial, (Scope, ExpList)):
+            if not element.is_fat_arrow and element.initial is not None and not isinstance(element.initial, (Scope, ExpList)):
                 try:
                     rhs_type = resolve_type(element.initial, want=var_type)
                 except CompilerNotice as ex:

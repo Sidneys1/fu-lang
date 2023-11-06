@@ -4,7 +4,8 @@ from contextvars import Token as ContextVarToken
 from dataclasses import dataclass, replace
 from enum import Enum
 from logging import getLogger
-from typing import ContextManager, Generator, Iterable, Iterator, Optional
+from typing import ContextManager, Generator, Iterable, Iterator, Optional, Callable
+from functools import partial
 
 from ..types import ARRAY_TYPE, STR_ARRAY_TYPE, VOID_TYPE, FloatType, GenericType, IntType, TypeBase
 from ..types.integral_types import *
@@ -17,9 +18,9 @@ from .analyzer.checks._check_conversion import _check_conversion
 from .analyzer.scope import _CURRENT_ANALYZER_SCOPE, AnalyzerScope, StaticVariableDecl
 from .analyzer.static_type import type_from_lex
 from .lexer import (Declaration, Identifier, Identity, Lex, LexedLiteral, Operator, ParamList, ReturnStatement, Scope,
-                    Statement)
+                    Statement, Expression, Atom, Operator)
 from .tokenizer import Token, TokenType
-from .util import is_sequence_of
+from .util import is_sequence_of, collect_returning_generator
 
 _LOG = getLogger(__package__)
 
@@ -598,48 +599,57 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
     assert func.type.callable is not None
     element = func.lex
     assert isinstance(element, Declaration)
-    assert isinstance(element.initial, Scope)
 
-    decls: dict[str, TypeBase] = {}
-
-    content = list(element.initial.content)
-    i = 0
-    while i < len(content):
-        x = content[i]
-        if not isinstance(x, Declaration):
-            i += 1
-            continue
-
-        decl_type = type_from_lex(x.identity.rhs, outer_scope.static_scope)
-        if isinstance(decl_type, AnalyzerScope):
-            i += 1
-            continue
-        if isinstance(decl_type, StaticVariableDecl):
-            decl_type = decl_type.type
-        decls[x.identity.lhs.value] = decl_type
-        # static = yield from _prep_stack_slot(x, decl_type)
-        # if static:
-        #     _LOG.debug(f"Initialization of `{x.identity.lhs.value}` was static.")
-        #     # content.remove(x)
-        #     continue
-        i += 1
-
+    # Determine args
     mods = element.identity.rhs.mods
     assert mods
     last_mod = mods[-1]
     assert isinstance(last_mod, ParamList)
     params = last_mod.params
     assert is_sequence_of(params, Identity)
-    args = {params[i].lhs.value: (make_ref(v) if v.reference_type else v) for i, v in enumerate(func.type.callable[0])}
 
+    args = {params[i].lhs.value: (make_ref(v) if v.reference_type else v) for i, v in enumerate(func.type.callable[0])}
+    decls: dict[str, TypeBase] = {}
     code: bytes
     source_locs: list[TempSourceMap] = []
-    with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
-                       decls=decls) as scope, BytesIO() as buffer:
-        # TODO split in to branch-delimited blocks of code
-        for source_loc in compile_blocks(element.initial.content, buffer):
-            source_locs.append(source_loc)
-        code = buffer.getvalue()
+
+    if element.is_fat_arrow:
+        assert isinstance(element.initial, (Expression, Atom, Operator, Identifier, LexedLiteral))
+        with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
+                    decls=decls) as scope, BytesIO() as buffer:
+            # TODO split in to branch-delimited blocks of code
+            return_storage, source_maps = collect_returning_generator(compile_expression(element.initial, buffer))
+            start = buffer.tell()
+            convert_to_stack(return_storage, func.type.callable[1], buffer, element.initial.location)
+            write_to_buffer(buffer, OpcodeEnum.RET)
+            for source_loc in source_maps:
+                source_locs.append(source_loc)
+            source_locs.append(TempSourceMap(start, buffer.tell() - start, element.initial.location))
+            code = buffer.getvalue()
+    else:
+        assert isinstance(element.initial, Scope)
+        # Generate decls
+        i = 0
+        while i < len(element.initial.content):
+            x = element.initial.content[i]
+            if not isinstance(x, Declaration):
+                i += 1
+                continue
+            decl_type = type_from_lex(x.identity.rhs, outer_scope.static_scope)
+            if isinstance(decl_type, AnalyzerScope):
+                i += 1
+                continue
+            if isinstance(decl_type, StaticVariableDecl):
+                decl_type = decl_type.type
+            decls[x.identity.lhs.value] = decl_type
+            i += 1
+
+        with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
+                        decls=decls) as scope, BytesIO() as buffer:
+            # TODO split in to branch-delimited blocks of code
+            for source_loc in compile_blocks(element.initial.content, buffer):
+                source_locs.append(source_loc)
+            code = buffer.getvalue()
 
     assert isinstance(func.lex, Declaration)
     name = _BUILDER.add_string(func.lex.identity.lhs.value)
