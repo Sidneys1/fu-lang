@@ -6,7 +6,7 @@ from time import perf_counter
 from operator import add, sub, mul, floordiv, truediv
 
 from ..types.integral_types import FloatType, IntType
-from .bytecode import NumericTypes, OpcodeEnum, ParamType, getLogger
+from .bytecode import NumericTypes, OpcodeEnum, ParamType, getLogger, int_u16
 from .bytecode.structures import BytecodeBinary
 
 _LOG = getLogger(__name__)
@@ -89,7 +89,7 @@ class VM:
         try:
             while True:
                 if 0 > self.ip or self.ip >= len(self.code):
-                    raise RuntimeError(f'Instruction pointer out of bounds!')
+                    raise RuntimeError(f'Instruction pointer out of bounds ({self.ip:#06x})!')
                 self.step()
         except VM.VmTerminated as ex:
             extra = f' with exit code {ex.exit_code}'
@@ -132,7 +132,7 @@ class VM:
             case _:
                 raise NotImplementedError(f"Don't know how to access slot {slot} of a {type(thing).__name__}")
 
-    def step(self):
+    def step(self) -> None:
         length, op, params = self.decode_op()
         _LOG.debug(f"{self.ip:#04x}-{self.ip+length-1:#04x} {op.name}({params})")
         stack_frame = self._stack_frames[-1]
@@ -216,6 +216,16 @@ class VM:
                     # TODO: checked exception
                     pass
             stack_frame.stack.append(val)
+            self.ip += length
+        elif op == OpcodeEnum.JMP:
+            target: int_u16 = params[0]
+            self.ip = target
+        elif op == OpcodeEnum.JZ:
+            # Jump only if top of stack is zero
+            top_stack = stack_frame.stack[-1]
+            if top_stack in (0, False):
+                target = params[0]
+                self.ip += target
             self.ip += length
         else:
             raise NotImplementedError(f"Opcode {op.name} is not supported! At: {self.ip:#04x}.")

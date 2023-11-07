@@ -76,6 +76,9 @@ _encode_f16: Callable[[float_f16], bytes] = partial(_encode_struct, '>e')
 _encode_f32: Callable[[float_f32], bytes] = partial(_encode_struct, '>f')
 _encode_f64: Callable[[float_f64], bytes] = partial(_encode_struct, '>d')
 
+_decode_bool: Callable[[bytes], bool] = partial(_decode_struct, '>?')
+_encode_bool: Callable[[bool], bytes] = partial(_encode_struct, '>?')
+
 _NUMERIC_CODERS = {
     int_u8: (_encode_u8, _decode_u8),
     int_u16: (_encode_u16, _decode_u16),
@@ -135,6 +138,8 @@ class NumericTypes(Enum):
     f32 = auto(), 4, _decode_f32
     f64 = auto(), 8, _decode_f64
 
+    bool = auto(), 1, _decode_bool
+
     @staticmethod
     def from_int_type(rhs: IntType):
         return NumericTypes[rhs.name]
@@ -151,6 +156,8 @@ class NumericTypes(Enum):
                 return F32_TYPE
             case self.u64:
                 return U64_TYPE
+            case self.bool:
+                return BOOL_TYPE
             case _:
                 raise NotImplementedError(f"{self.name}")
 
@@ -275,6 +282,8 @@ class OpcodeEnum(Enum):
 
     # Control flow
     RET = auto(), 'ret', 'return'
+    JMP = auto(), 'jmp {0:#02x}', 'jump {0:+}', NumericTypes.i16
+    JZ = auto(), 'jz {0:#x}', 'pop from stack, jump if zero/false {0:+}', NumericTypes.i16
 
     # # Stack and accumulator
     # POP = auto()

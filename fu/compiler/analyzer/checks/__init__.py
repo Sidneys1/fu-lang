@@ -387,6 +387,20 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             yield from _check(element.value)
         case LexedLiteral():
             pass
+        case IfStatement():
+            if element.term is not None:
+                _check(element.term)
+                # check that term evaluates to a bool
+                resolved = resolve_type(element.term, BOOL_TYPE)
+                assert not isinstance(resolved, StaticScope)
+                if isinstance(resolved, StaticVariableDecl):
+                    resovled_decl = resolved
+                    resolved = resolved.type
+                if resolved != BOOL_TYPE:
+                    yield CompilerNotice('Error', f"`if` term does not evaluate to a `bool` (got `{resolved.name}` instead).", element.term.location)
+            for x in element.content:
+                _check(element.content)
+
         # case Declaration():
         #     yield CompilerNotice(
         #         'Critical', f"Checks for `Declaration(initial={type(element.initial).__name__})` are not implemented!",

@@ -17,6 +17,7 @@ f64: type;
 size_t: type;
 usize_t: type;
 
+// To be fleshed out once user-defined unions exist.
 bool: type;
 
 str: type = u8[];

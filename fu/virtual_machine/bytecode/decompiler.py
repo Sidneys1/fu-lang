@@ -1,6 +1,8 @@
 from io import SEEK_SET, BytesIO
 from typing import Iterator
 
+from ...color import RESET, COMMENT, NUM, FUNC_NAME, FAINT, KEYWORD, PARAM, TEMPLATE, CONSTANT, TYPE
+
 from . import OpcodeEnum, _decode_u32
 from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
@@ -37,16 +39,51 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
                 break
             if last_opcode == OpcodeEnum.RET:
                 if binary is None:
-                    yield '       |                        | <unknown>:'
+                    yield f'       {FAINT}│                        │ {RESET + FUNC_NAME}<unknown>:{RESET}'
                 elif binary is not None:
                     func = next((x for x in binary.functions if x.address == last_pos), None)
                     if func is not None:
                         fqdn, name = _get_fqdn(func, binary.strings)
                         fqdn = (fqdn + '.' + name) if fqdn else name
                         sig = _get_signature(func, binary.strings, binary.types)
-                        yield f"       |                   | {fqdn + ':':<17} ; {name}: {sig} = {{ /* ... */ }}"
+                        yield f"       {FAINT}│                   │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {name}: {sig} = {{ /* ... */ }}{RESET}"
 
             asm, explain = opcode.as_asm(*args)
+            padding = ''
+            if len(asm) < 17:
+                padding = ' ' * (17 - len(asm))
+            op = asm
+            params = ''
+            if ' ' in asm:
+                op, params = asm.split(' ', maxsplit=1)
+            # input(f"{asm!r} -> {op!r} - {params!r}")
+
+            param_count = 0
+            if '.' in op:
+                first, *rest = op.split('.')
+                param_count = len(rest)
+                op = f"{KEYWORD}{first}{RESET}.{TYPE}" + f'{RESET}.{TYPE}'.join(rest) + RESET
+            else:
+                op = KEYWORD + op + RESET
+
+            asm = op
+            if params:
+                asm += ' ' + CONSTANT + params + RESET
+            asm += padding
+
             hex_bytes = ' '.join(f'{x:02x}' for x in raw)
-            yield f"{pos:#06x} | {hex_bytes:<17} |   {asm:<17} ;   {explain}"
+            padding = ''
+            if len(hex_bytes) < 17:
+                padding = ' ' * (17 - len(hex_bytes))
+            hb = hex_bytes.split(' ')
+            hex_bytes = KEYWORD + hb[0] + RESET
+            for i, b in enumerate(hb[1:]):
+                if i < param_count:
+                    hex_bytes += ' ' + TYPE + b
+                else:
+                    hex_bytes += ' ' + CONSTANT + b
+            hex_bytes += RESET
+
+            yield (f"{FAINT}{pos:#06x} │ {RESET + NUM}{hex_bytes + padding} "
+                   f"{RESET + FAINT}│{RESET}   {asm} {COMMENT}; {explain}{RESET}")
             pos = stream.tell()

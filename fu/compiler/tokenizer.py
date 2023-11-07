@@ -28,8 +28,10 @@ class TokenType(Enum):
     # Symbols
     Colon = ':'
     LParen = '('
+    """`(`"""
     RParen = ')'
     LBrace = '{'
+    """`{`"""
     RBrace = '}'
     LBracket = '['
     RBracket = ']'
@@ -42,8 +44,12 @@ class TokenType(Enum):
     FatArrow = '=>'
 
     # Keywords
+    IfKeyword = 'if'
+    ElseKeyword = 'else'
     ReturnKeyword = 'return'
     NamespaceKeyword = 'namespace'
+    TrueKeyword = 'true'
+    FalseKeyword = 'false'
 
     # Char classes
     Operator = '+-*/!'

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable
 
-from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, FloatType, IntType, TypeBase
+from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, BOOL_TYPE, FloatType, IntType, TypeBase
 from ...types.integral_types import IntegralType
 from .. import CompilerNotice
 from ..lexer import ExpList, Identifier, Lex, Operator, ReturnStatement, StaticScope, Token, TokenType, Type_
@@ -179,6 +179,8 @@ def resolve_type(element: Lex,
                                  element.location)
         case LexedLiteral():
             match element.type:
+                case TokenType.TrueKeyword | TokenType.FalseKeyword:
+                    return BOOL_TYPE
                 case TokenType.String:
                     return STR_TYPE
                 case TokenType.Number:

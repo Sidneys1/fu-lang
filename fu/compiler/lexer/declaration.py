@@ -49,6 +49,7 @@ class TypeDeclaration(Lex):
                     for x in self.raw[lindex + 1:rindex]:
                         if isinstance(x, Lex):
                             _LOG.debug(f"formatting typedecl inside, got Lex: {type(x).__name__}: {str(x)!r}")
+                            yield tab
                             yield from x.to_code()
                         elif x.type == TokenType.BlankLine:
                             _LOG.debug(f"formatting typedecl inside, got blankline: {x.value!r}")

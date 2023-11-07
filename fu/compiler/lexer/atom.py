@@ -31,7 +31,7 @@ class Atom(Lex):
             raw.append(stream.expect(TokenType.RParen))
             return Atom(raw, body, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
-        if not stream.eof and stream.peek().type in (TokenType.String, TokenType.Number):
+        if not stream.eof and stream.peek().type in (TokenType.String, TokenType.Number, TokenType.TrueKeyword, TokenType.FalseKeyword):
             tok = stream.pop()
             return LexedLiteral([tok], tok.value, tok.type, location=tok.location)
 

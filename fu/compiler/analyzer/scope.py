@@ -6,6 +6,7 @@ from logging import getLogger
 from typing import Optional, Self, Union
 
 from .. import SourceLocation
+from ...types import BOOL_TYPE
 from .static_variable_decl import StaticVariableDecl
 
 _LOG = getLogger(__package__)
@@ -39,6 +40,12 @@ class AnalyzerScope:
     @classmethod
     def current(cls) -> 'AnalyzerScope':
         return _CURRENT_ANALYZER_SCOPE.get()
+
+    @classmethod
+    def new_global_scope(cls) -> 'AnalyzerScope':
+        assert _CURRENT_ANALYZER_SCOPE.get(None) is None
+        ret = cls(None, AnalyzerScope.Type.Anonymous)
+        return ret
 
     @classmethod
     @contextmanager

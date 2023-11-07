@@ -127,6 +127,9 @@ class EnumType(IntType):
             object.__setattr__(self, 'inherits', (selection, ))
         object.__setattr__(self, 'size', self.inherits[0].size)
 
+        for name in self.values:
+            self.members[name] = self
 
-BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U32_TYPE, ), signed=False, is_builtin=True)
+
+BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U8_TYPE, ), signed=False, is_builtin=True)
 """A special Enumeration type that inherits from u32 instead of u8 (as would be expected)."""

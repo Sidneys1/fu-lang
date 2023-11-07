@@ -27,6 +27,7 @@ def _indent():
     reset = _FORMATTING_DEPTH.set(depth + 1)
     try:
         yield _TAB * (depth + 1)
+        # yield (str(depth + 1) * 2) * (depth + 1)
     finally:
         _FORMATTING_DEPTH.reset(reset)
 
@@ -274,7 +275,7 @@ class Namespace(Lex):
         # if self.metadata:
         #     yield self.metadata.to_code()
 
-        yield _tab() + '.'.join(x.value for x in self.name) + ': namespace = '
+        yield '.'.join(x.value for x in self.name) + ': namespace = '
         yield from self.static_scope.to_code()
         yield ';'
 
@@ -312,7 +313,7 @@ class SpecialOperatorIdentity(Lex):
     rhs: Type_
 
     def to_code(self) -> Iterable[str]:
-        yield _tab() + f"{self.lhs.value}: {''.join(self.rhs.to_code())}"
+        yield f"{self.lhs.value}: {''.join(self.rhs.to_code())}"
 
     def __repr__(self) -> str:
         return f"SpecialOperator<{self.lhs!r}, {self.rhs!r}>"
@@ -331,7 +332,7 @@ class Identity(Lex):
         return f"{self.lhs}: {self.rhs}"
 
     def to_code(self) -> Iterable[str]:
-        yield _tab() + ''.join(self.lhs.to_code()) + ': ' + ''.join(self.rhs.to_code())
+        yield ''.join(self.lhs.to_code()) + ': ' + ''.join(self.rhs.to_code())
 
     def __repr__(self) -> str:
         return f"Identity<{self.lhs!r}, {self.rhs!r}>"
@@ -417,7 +418,7 @@ class Statement(Lex):
         return [Expression]
 
     def to_code(self) -> Iterable[str]:
-        yield _tab()
+        # yield _tab()
         yield from self.value.to_code()
         yield ';'
 
@@ -426,6 +427,8 @@ class Statement(Lex):
 
     @classmethod
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        if stream.peek().type == TokenType.ReturnKeyword:
+            return ReturnStatement.try_lex(stream)
         for t in cls.allowed:
             if (res := t.try_lex(stream)) is not None:
                 break
@@ -451,14 +454,15 @@ class StaticScope(Lex):
 
         print(f"{len(self.raw)=}: {self.raw=}")
         yield '{'
-        with _indent():
+        with _indent() as tab:
             for x in self.raw[1:-1]:
                 if isinstance(x, Lex):
+                    yield tab
                     yield from x
                 elif x.type == TokenType.BlankLine:
                     yield x.value
                 else:
-                    yield _tab() + x.value
+                    yield tab + x.value
         yield '}'
         # if not self.content:
         #     yield '{ }'
@@ -498,9 +502,132 @@ class StaticScope(Lex):
 
 
 @dataclass(repr=False, slots=True, frozen=True)
+class IfStatement(Lex):
+    """IfStatement: 'if' '(' Expression ')' Scope | Statement [ 'else' ]"""
+    term: Expression | None
+    content: list[Union['Scope', Statement, 'IfStatement', ReturnStatement]]
+    is_else: bool
+
+    def to_code(self) -> Iterable[str]:
+        # yield _tab()
+        start = 0
+        if self.is_else:
+            yield 'else'
+            yield ' '
+            start += 1
+        if self.term is not None:
+            yield 'if'
+            yield ' ('
+            yield from self.term.to_code()
+            yield ') '
+            start += 4
+        need_space = False
+        i = start
+        while i < len(self.raw):
+            elem = self.raw[i]
+            if isinstance(elem, IfStatement):
+                if need_space:
+                    need_space = False
+                    yield ' '
+                else:
+                    yield _tab()
+                yield from elem.to_code()
+            elif isinstance(elem, Scope):
+                yield from elem.to_code()
+                need_space = True
+            elif isinstance(elem, Lex):
+                # Statement
+                with _indent() as tab:
+                    yield tab
+                    yield from elem.to_code()
+            elif elem.type == TokenType.BlankLine:
+                yield elem.value
+            i += 1
+        # for i, x in enumerate(self.raw[start:]):
+        #     if isinstance(x, Lex):
+        #         if need_space:
+        #             yield '_'
+        #             need_space = False
+        #         yield from x.to_code()
+        #         need_space = True
+        #     elif x.type == TokenType.BlankLine:
+        #         yield x.value
+        #     else:
+        #         yield x.value
+
+    def _s_expr(self) -> tuple[str, list[Lex]]:
+        ret: list[Lex] = []
+        if self.term:
+            ret.append(self.term)
+        ret.extend(self.content)
+        if self.is_else:
+            if self.term:
+                return 'else-if', ret
+            return 'else', ret
+        return 'if', ret
+
+    @classmethod
+    def _try_lex(cls, stream: TokenStream) -> Lex | None:
+        raw: list[Lex | Token] = []
+        is_else: bool = False
+        content: list[Union['Scope', Statement, 'IfStatement', ReturnStatement]]
+        if stream.peek().type == TokenType.ElseKeyword:
+            is_else = True
+            raw.append(stream.expect(TokenType.ElseKeyword))
+            if stream.peek().type != TokenType.IfKeyword:
+                while (tok_type := stream.peek().type) in NON_CODE_TOKEN_TYPES:
+                    raw.append(stream.expect(tok_type))
+                content = [
+                    Scope.expect(stream)
+                    if stream.peek().type == TokenType.LBrace else Statement.expect(stream)  # type: ignore
+                ]
+                raw.append(content[-1])
+                return IfStatement(raw,
+                                   None,
+                                   content,
+                                   is_else,
+                                   location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+
+        raw.append(stream.expect(TokenType.IfKeyword))
+        raw.append(stream.expect(TokenType.LParen))
+        term: Expression = Expression.expect(stream)  # type: ignore
+        raw.append(term)
+        raw.append(stream.expect(TokenType.RParen))
+
+        while (tok_type := stream.peek().type) in NON_CODE_TOKEN_TYPES:
+            raw.append(stream.expect(tok_type))
+
+        content = [
+            Scope.expect(stream) if stream.peek().type == TokenType.LBrace else Statement.expect(stream)  # type: ignore
+        ]
+        raw.append(content[-1])
+
+        while not is_else:
+            tok_type = stream.peek().type
+            if tok_type in NON_CODE_TOKEN_TYPES:
+                raw.append(stream.expect(tok_type))
+                continue
+            if tok_type == TokenType.ElseKeyword:
+                else_block = IfStatement.expect(stream)
+                assert isinstance(else_block, IfStatement) and else_block.is_else
+                raw.append(else_block)
+                content.append(else_block)
+                continue
+            break
+
+        if not is_else:
+            assert term is not None, "`if ...` without term (aka not `if (term) ...`) is only valid if it's `else ...`"
+        return IfStatement(raw,
+                           term,
+                           content,
+                           is_else,
+                           location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+
+
+@dataclass(repr=False, slots=True, frozen=True)
 class Scope(Lex):
     """Scope: '{' (Statement | ReturnStatement)* '}';"""
-    content: list[Union['ReturnStatement', 'Statement', Declaration]]
+    content: list[Union['ReturnStatement', 'Statement', Declaration, 'IfStatement']]
 
     def to_code(self) -> Iterable[str]:
         if len(self.raw) == 2:
@@ -510,12 +637,13 @@ class Scope(Lex):
         with _indent() as tab:
             for x in self.raw[1:-1]:
                 if isinstance(x, Lex):
+                    yield tab
                     yield from x.to_code()
                 elif x.type == TokenType.BlankLine:
                     yield x.value
                 else:
                     yield tab + x.value
-        yield '}'
+        yield _tab() + '}'
 
     def __str__(self) -> str:
         with _indent():
@@ -540,6 +668,12 @@ class Scope(Lex):
                 case TokenType.RBrace:
                     raw.append(stream.pop())
                     return Scope(raw, ret, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                case TokenType.IfKeyword:
+                    smt = IfStatement.try_lex(stream)
+                    assert smt is not None
+                    raw.append(smt)
+                    ret.append(smt)
+                    continue
                 case TokenType.ReturnKeyword:
                     smt = ReturnStatement.try_lex(stream)
                     assert smt is not None

@@ -23,6 +23,10 @@ class LexedLiteral(Lex):
 
     def to_value(self) -> int | float | str | bool:
         match self.type:
+            case TokenType.TrueKeyword:
+                return True
+            case TokenType.FalseKeyword:
+                return False
             case TokenType.Number:
                 if self.value.endswith('f') or '.' in self.value:
                     return float(self.value[:-1])

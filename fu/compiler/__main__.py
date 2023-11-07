@@ -19,6 +19,7 @@ class ParsedArgs(Protocol):
     run: bool
     verbose: bool
     check_only: bool
+    format: bool
     input: Path
     std: Path
     args: list[str]
@@ -46,6 +47,7 @@ def main(*args) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-c', '--check-only', help="Stop after checking.", action='store_true')
     group.add_argument('-r', '--run', help="Compile and run.", action='store_true')
+    group.add_argument('-f', '--format', help="Print a formatted version of the input file.", action='store_true')
 
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--std',
@@ -53,33 +55,36 @@ def main(*args) -> int:
                         type=ParsedArgs.parse_std_path,
                         help="Path to the standard library (default: `%(default)s`).",
                         default=DEFAULT_STD_ROOT)
-    parser.add_argument('input',
+    parser.add_argument(
+        'input',
         metavar='PATH',
         type=ParsedArgs.parse_input_path,
-        help=
-        'Compile source file specified, or files found under a directory (default: `%(default)s`).',
+        help='Compile source file specified, or files found under a directory (default: `%(default)s`).',
         default='.' + pathsep)
-    parser.add_argument('args',
-        metavar='ARG',
-        nargs='*',
-        help=
-        'Command line arguments (for use with `--run`).')
+    parser.add_argument('args', metavar='ARG', nargs='*', help='Command line arguments (for use with `--run`).')
     ns: ParsedArgs
     ns = parser.parse_args(args)  # type: ignore
 
-    if ns.verbose:
-        basicConfig(level=DEBUG)
-    else:
-        getLogger(__package__ + ".lexer").setLevel(level=ERROR)
-        basicConfig(level=INFO)
-
-    global_scope = AnalyzerScope(None, AnalyzerScope.Type.Anonymous)
+    global_scope = AnalyzerScope.new_global_scope()
     with set_global_scope(global_scope):
         docs: list[Document] = list(load_std(ns.std))
+        if ns.verbose:
+            basicConfig(level=DEBUG)
+        else:
+            getLogger(__package__ + ".lexer").setLevel(level=ERROR)
+        basicConfig(level=INFO)
         if ns.input.is_dir():
             docs.extend(discover_files(ns.input))
         else:
             docs.append(parse_file(ns.input))
+
+        if ns.format:
+            for doc in docs[1:]:
+                print(f'```{doc.location.file}')
+                print(''.join(x for x in doc.to_code()), end='')
+            print('```')
+            return
+
         errors = list(check_program(docs))
 
         if not ns.check_only and all(error.level.lower() not in ('error', 'critical') for error in errors):

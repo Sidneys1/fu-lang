@@ -12,7 +12,7 @@ class ReturnStatement(Lex):
     value: Optional['Expression']
 
     def to_code(self) -> Iterable[str]:
-        yield _tab() + 'return'
+        yield 'return'
         if self.value is not None:
             yield ' '
             yield from self.value.to_code()

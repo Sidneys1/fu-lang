@@ -25,8 +25,7 @@ def pytest_configure(config):
 @fixture
 def global_scope():
     from fu.compiler.analyzer.scope import set_global_scope, AnalyzerScope
-    global_scope = AnalyzerScope(None, AnalyzerScope.Type.Namespace)
-    with set_global_scope(global_scope):
+    with set_global_scope(AnalyzerScope.new_global_scope()) as global_scope:
         yield global_scope
 
 

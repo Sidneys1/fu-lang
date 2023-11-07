@@ -1,16 +1,14 @@
-from contextlib import contextmanager
-from contextvars import ContextVar
-from contextvars import Token as ContextVarToken
-from dataclasses import dataclass, replace
+from contextlib import contextmanager, AbstractContextManager
+from contextvars import ContextVar, Token as ContextVarToken
+from dataclasses import dataclass
 from enum import Enum
 from logging import getLogger
-from typing import ContextManager, Generator, Iterable, Iterator, Optional, Callable
-from functools import partial
+from typing import ContextManager, Generator, Iterable, Iterator, Optional, Any
 
 from ..types import ARRAY_TYPE, STR_ARRAY_TYPE, VOID_TYPE, FloatType, GenericType, IntType, TypeBase
 from ..types.integral_types import *
 from ..virtual_machine.bytecode import (BytecodeTypes, NumericTypes, OpcodeEnum, _encode_f32, _encode_numeric,
-                                        _encode_u8, int_u8)
+                                        _encode_u8, int_u8, int_i16)
 from ..virtual_machine.bytecode.builder import BytecodeBuilder
 from ..virtual_machine.bytecode.structures import *
 from . import CompilerNotice
@@ -18,7 +16,7 @@ from .analyzer.checks._check_conversion import _check_conversion
 from .analyzer.scope import _CURRENT_ANALYZER_SCOPE, AnalyzerScope, StaticVariableDecl
 from .analyzer.static_type import type_from_lex
 from .lexer import (Declaration, Identifier, Identity, Lex, LexedLiteral, Operator, ParamList, ReturnStatement, Scope,
-                    Statement, Expression, Atom, Operator)
+                    Statement, Expression, Atom, Operator, IfStatement)
 from .tokenizer import Token, TokenType
 from .util import is_sequence_of, collect_returning_generator
 
@@ -123,11 +121,13 @@ class FunctionScope(CompileScope):
 _CURRENT_COMPILE_SCOPE: ContextVar[CompileScope] = ContextVar('_CURRENT_COMPILE_SCOPE')
 
 
-def write_to_buffer(buffer: BytesIO, *args: BytecodeTypes | Enum, silent=False) -> None:
+def write_to_buffer(buffer: BytesIO, *args: BytecodeTypes | Enum | 'Label', silent=False) -> None:
     for x in args:
         # if not silent:
         #     print(repr(x))
         match x:
+            case Label():
+                buffer.write(x.relative())
             case tuple():
                 for y in x:
                     write_to_buffer(buffer, y, silent=True)
@@ -257,7 +257,7 @@ def _storage_type_of(name: str, loc: SourceLocation) -> StorageDescriptor:
     for i, (k, v) in enumerate(current_fn.locals.items()):
         if k == name:
             return StorageDescriptor(Storage.Locals, v, slot=i)
-    for i, (k, v) in enumerate(current_fn.decls.items()):
+    for k, v in current_fn.decls.items():
         if k == name:
             return StorageDescriptor(Storage.Locals, v, slot=None)
     raise CompilerNotice('Error', f"Cannot find `{name}` in `{current_fn.fqdn}`.", loc)
@@ -289,6 +289,9 @@ def compile_expression(expression: Lex,
         case LexedLiteral():
             value = expression.to_value()
             match value, want:
+                case bool(), BOOL_TYPE:
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.bool, b'\x01' if value else b'\x00')
+                    return StorageDescriptor(Storage.Stack, BOOL_TYPE)
                 case float(), None:
                     # TODO: best float type for literal
                     pass
@@ -534,7 +537,123 @@ def convert_to_stack(from_: StorageDescriptor,
                 loc)
 
 
-def compile_statement(statement: Statement | Declaration | ReturnStatement, buffer: BytesIO) -> Iterator[TempSourceMap]:
+@dataclass(slots=True)
+class Label(AbstractContextManager):
+    on: BytesIO
+    patch_locations: list[int] = field(default_factory=list)
+    _location: int | None = field(init=False, default=None)
+
+    def append(self, *patch_locations: int) -> None:
+        if self._location is not None:
+            pos = self.on.tell()
+            for x in self.patch_locations:
+                self._patch(x)
+            self.on.seek(pos)
+            return
+        self.patch_locations.extend(patch_locations)
+
+    def relative(self) -> bytes:
+        pos = self.on.tell()
+        if self._location is not None:
+            return _encode_numeric((self._location - pos) - 2, int_i16)
+        self.patch_locations.append(pos)
+        return b'\xde\xad'
+
+    def _patch(self, patch_location: int) -> None:
+        self.on.seek(patch_location)
+        write_to_buffer(self.on, _encode_numeric((self._location - patch_location) - 2, int_i16))
+
+    def link(self) -> None:
+        """
+        Link this Label to a location.
+
+        Any existing patch_locations will be patched.
+
+        Any future patch locations will be patched immediately.
+        """
+        if self._location is not None:
+            raise ValueError()
+
+        self._location = self.on.tell()
+        while self.patch_locations:
+            self._patch(self.patch_locations.pop())
+        self.on.seek(self._location)
+
+    def __exit__(self, __exc_type: type[BaseException] | None, _, __) -> bool | None:
+        if __exc_type is None:
+            self.link()
+        return None
+
+
+def _emit_if_head(term: Expression, buffer: BytesIO, next_case: Label) -> Iterator[TempSourceMap]:
+    start = buffer.tell()
+    storage = yield from compile_expression(term, buffer, BOOL_TYPE)
+    convert_to_stack(storage, BOOL_TYPE, buffer, term.location)
+    write_to_buffer(buffer, OpcodeEnum.JZ, next_case)
+    yield TempSourceMap(start, buffer.tell() - start, term.location)
+
+
+def _emit_if_body(content: Scope | Statement | ReturnStatement,
+                  buffer: BytesIO,
+                  *,
+                  end_label: Label | None = None) -> Iterator[TempSourceMap]:
+    if isinstance(content, Scope):
+        yield from compile_blocks(content.content, buffer)
+    else:
+        yield from compile_statement(content, buffer)
+
+    if end_label is not None:
+        write_to_buffer(buffer, OpcodeEnum.JMP, end_label)
+
+
+def compile_if_statement(statement: IfStatement, buffer: BytesIO) -> Iterator[TempSourceMap]:
+    assert statement.term is not None
+    next_case_label = Label(buffer)
+    yield from _emit_if_head(statement.term, buffer, next_case_label)
+
+    other_cases: list[IfStatement] = list(statement.content[1:])  # type: ignore
+
+    has_else_block = other_cases and isinstance(last := statement.content[-1], IfStatement) and last.term is None
+    else_block: IfStatement | None = None
+    if has_else_block:
+        last_block = other_cases.pop()
+        assert isinstance(last_block, IfStatement)
+        else_block = last_block
+
+    end_label = Label(buffer)
+
+    # jumps_to_end = []
+    assert isinstance(
+        statement.content[0],
+        (Scope, Statement, ReturnStatement)), f"Body was unexpectedly a `{type(statement.content[0]).__name__}`!"
+    yield from _emit_if_body(statement.content[0], buffer, end_label=end_label if bool(other_cases) else None)
+
+    for case in other_cases:
+        assert isinstance(case, IfStatement) and case.term is not None
+        next_case_label.link()
+
+        # Emit head
+        next_case_label = Label(buffer)
+        yield from _emit_if_head(case.term, buffer, next_case_label)
+
+        # Emit body
+        assert not isinstance(case.content[0], IfStatement)
+        yield from _emit_if_body(case.content[0], buffer, end_label=end_label)
+
+    next_case_label.link()
+
+    if else_block is not None:
+        # Emit body
+        assert len(else_block.content) == 1
+        assert not isinstance(else_block.content[0], IfStatement)
+        yield from _emit_if_body(else_block.content[0], buffer)
+
+    # Rewrite the jumps to the end...
+    end_label.link()
+
+
+def compile_statement(statement: Statement | IfStatement | Declaration | ReturnStatement,
+                      buffer: BytesIO) -> Iterator[TempSourceMap]:
     # scope = CompileScope.current()
     fn_scope = FunctionScope.current_fn()
     _LOG.debug(f'Compiling statement: {str(statement).strip()}')
@@ -566,29 +685,20 @@ def compile_statement(statement: Statement | Declaration | ReturnStatement, buff
                 convert_to_stack(return_storage, fn_ret, buffer, statement.value.location)
             write_to_buffer(buffer, OpcodeEnum.RET)
             yield TempSourceMap(start, buffer.tell() - start, statement.location)
+        case IfStatement():
+            # evaluate thingy
+            yield from compile_if_statement(statement, buffer)
+            yield TempSourceMap(start, buffer.tell() - start, statement.location)
         case _:
             raise CompilerNotice('Error', f"Don't know how to compile statement of type `{type(statement).__name__}`!",
                                  statement.location)
     return None
 
 
-def compile_blocks(statements: Iterable[Statement | Declaration | ReturnStatement],
+def compile_blocks(statements: Iterable[Statement | Declaration | ReturnStatement | IfStatement],
                    buffer: BytesIO) -> Iterator[TempSourceMap]:
     for statement in statements:
         yield from compile_statement(statement, buffer)
-    #     # TODO
-    #     block_end = False
-    #     if block_end:
-    #         _LOG.debug(f"Compiled block with lines: {lines}")
-    #         # yield BytecodeBlock(SourceLocation.from_to(lines[0].location, lines[-1].location), content=lines)
-    #         lines = []
-
-    #     line = compile_statement(statement)
-    #     assert line is not None
-    #     lines.append(line)
-    # if lines:
-    #     _LOG.debug(f"Compiled block with lines: {lines}")
-    #     yield BytecodeBlock(SourceLocation.from_to(lines[0].location, lines[-1].location), content=lines)
 
 
 def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
@@ -616,7 +726,7 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
     if element.is_fat_arrow:
         assert isinstance(element.initial, (Expression, Atom, Operator, Identifier, LexedLiteral))
         with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
-                    decls=decls) as scope, BytesIO() as buffer:
+                           decls=decls) as scope, BytesIO() as buffer:
             # TODO split in to branch-delimited blocks of code
             return_storage, source_maps = collect_returning_generator(compile_expression(element.initial, buffer))
             start = buffer.tell()
@@ -645,10 +755,12 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
             i += 1
 
         with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
-                        decls=decls) as scope, BytesIO() as buffer:
+                           decls=decls) as scope, BytesIO() as buffer:
             # TODO split in to branch-delimited blocks of code
             for source_loc in compile_blocks(element.initial.content, buffer):
                 source_locs.append(source_loc)
+            if OpcodeEnum(buffer.getbuffer()[-1]) != OpcodeEnum.RET:
+                write_to_buffer(buffer, OpcodeEnum.RET)
             code = buffer.getvalue()
 
     assert isinstance(func.lex, Declaration)
