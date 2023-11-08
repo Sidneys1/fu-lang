@@ -42,6 +42,7 @@ class TokenType(Enum):
     LessThan = '<'
     GreaterThan = '>'
     FatArrow = '=>'
+    Equality = '=='
 
     # Keywords
     IfKeyword = 'if'
@@ -186,11 +187,17 @@ class Token:
                     start_pos = npos
                     continue
                 elif (tt := TOKEN_REVERSE_MAP.get(char, None)) is not None:
-                    if tt == TokenType.Equals and stream.peek() == '>':
-                        start_pos = stream.position
-                        char = stream.pop()
-                        tt = TokenType.FatArrow
-                        char = '=>'
+                    if tt == TokenType.Equals:
+                        if (peek := stream.peek()) == '>':
+                            start_pos = stream.position
+                            char = stream.pop()
+                            tt = TokenType.FatArrow
+                            char = '=>'
+                        elif peek == '=':
+                            start_pos = stream.position
+                            char = stream.pop()
+                            tt = TokenType.Equality
+                            char = '=='
                     yield Token(char, tt, _pos(start_pos, stream.position))
                 elif char in TokenType.Operator.value:
                     yield Token(char, TokenType.Operator, _pos(start_pos, start_pos))

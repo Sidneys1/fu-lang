@@ -1,0 +1,3 @@
+---------- test\regression\func_call_2.fu ----------
+[2m   3 | test: u8() => test2[0;2m() + 2[2m0;[0m[0;0m <-- Checks for infix operator '+' are not implemented! [0;2m(test\regression\func_call_2.fu:3:20-25)
+[0m[m

@@ -58,7 +58,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 if name in BUILTINS:
                     t = BUILTINS[name]
                     _LOG.debug(f"Found interface definition for builtin `{name}`.")
-                    scope.members[name] = StaticVariableDecl(t, element)
+                    scope.members[name] = StaticVariableDecl(t,
+                                                             element,
+                                                             fqdn=(scope.fqdn + '.' +
+                                                                   name) if scope.parent is not None else name)
                     return
 
             if element.definition is None:
@@ -66,7 +69,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
 
             if isinstance(element.definition, Type_):
-                scope.members[name] = StaticVariableDecl(type_from_lex(element.definition, scope), element)
+                scope.members[name] = StaticVariableDecl(type_from_lex(element.definition, scope),
+                                                         element,
+                                                         fqdn=(scope.fqdn + '.' +
+                                                               name) if scope.parent is not None else name)
             else:
                 yield from create_new_interface(element, scope)
         case TypeDeclaration(type='type'):
@@ -88,7 +94,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 if name in BUILTINS:
                     t = BUILTINS[name]
                     _LOG.debug(f"Found type definition for builtin `{name}`.")
-                    scope.members[name] = StaticVariableDecl(t, element)
+                    scope.members[name] = StaticVariableDecl(t,
+                                                             element,
+                                                             fqdn=(scope.fqdn + '.' +
+                                                                   name) if scope.parent is not None else name)
                     return
                 # else:
                 #     input(f"wtf, got non-builtin {name} when parsing builtins?")
@@ -98,7 +107,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
 
             if isinstance(element.definition, Type_):
-                scope.members[name] = StaticVariableDecl(TypeType.of(type_from_lex(element.definition, scope)), element)
+                scope.members[name] = StaticVariableDecl(TypeType.of(type_from_lex(element.definition, scope)),
+                                                         element,
+                                                         fqdn=(scope.fqdn + '.' +
+                                                               name) if scope.parent is not None else name)
             else:
                 yield from create_new_type(element, scope)
         case Declaration(identity=Identity()):
@@ -162,7 +174,8 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 yield ex
                 return
 
-            if not element.is_fat_arrow and element.initial is not None and not isinstance(element.initial, (Scope, ExpList)):
+            if not element.is_fat_arrow and element.initial is not None and not isinstance(
+                    element.initial, (Scope, ExpList)):
                 try:
                     rhs_type = resolve_type(element.initial, want=var_type)
                 except CompilerNotice as ex:
@@ -178,7 +191,9 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
 
             _LOG.debug(f"Adding {name} to {scope.fqdn} as {var_type.name}")
             # input()
-            svd = StaticVariableDecl(var_type, element)
+            svd = StaticVariableDecl(var_type,
+                                     element,
+                                     fqdn=(scope.fqdn + '.' + name) if scope.parent is not None else name)
             scope.members[name] = svd
             if scope.this_decl is not None:
                 scope.this_decl.member_decls[name] = svd

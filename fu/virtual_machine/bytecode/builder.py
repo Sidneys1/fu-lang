@@ -1,5 +1,6 @@
 from io import SEEK_END, BytesIO
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
+from types import EllipsisType
 
 from ...compiler import SourceLocation
 from ...types import VOID_TYPE, TypeBase
@@ -13,9 +14,15 @@ class BytecodeBuilder:
     __types: list[BytecodeType]
     __strings: dict[str, int_u32]
     __strings_buffer: BytesIO
-    __functions: list[BytecodeFunction]
+    __functions: list[BytecodeFunction | EllipsisType]
     __code: list[bytes]
     __source_map: dict[SourceLocation, tuple[int_u32, int_u32]]
+    __function_map: dict[int_u32, int_u16]
+
+    @property
+    def function_map(self) -> Mapping[int_u32, int_u16]:
+        """Mapping from fqdn stringid to function id."""
+        return self.__function_map
 
     def __init__(self) -> None:
         self.__code_length = 0
@@ -26,10 +33,12 @@ class BytecodeBuilder:
         self.__strings_buffer = BytesIO(_encode_u32(zero_pos))
         self.__strings_buffer.seek(0, SEEK_END)
         self.__functions = []
+        self.__function_map = {}
         self.__code = []
         self.__source_map = {}
 
     def finalize(self, entrypoint: int_u32 | None) -> BytecodeBinary:
+        assert all(isinstance(x, BytecodeFunction) for x in self.__functions)
         return BytecodeBinary(entrypoint, b''.join(self.__code), self.__types, self.__strings_buffer.getvalue(),
                               self.__functions, self.__source_map)
 
@@ -56,9 +65,24 @@ class BytecodeBuilder:
             return i
         return self.__strings[string]
 
-    def add_function(self, fn: BytecodeFunction) -> int_u16:
+    def add_function(self, fn: BytecodeFunction, fqdn: int_u32) -> int_u16:
+        if fqdn in self.__function_map:
+            raise ValueError()
         self.__functions.append(fn)
-        return _to_bytecode_numeric(len(self.__functions) - 1, int_u16)
+        id_ = _to_bytecode_numeric(len(self.__functions) - 1, int_u16)
+        self.__function_map[fqdn] = id_
+        return id_
+
+    def reserve_function(self, fqdn: int_u32) -> int_u16:
+        if fqdn in self.__function_map:
+            raise ValueError()
+        self.__functions.append(...)
+        id_ = _to_bytecode_numeric(len(self.__functions) - 1, int_u16)
+        self.__function_map[fqdn] = id_
+        return id_
+
+    def fulfill_function_reservation(self, reservation: int_u16, fn: BytecodeFunction) -> None:
+        self.__functions[reservation] = fn
 
     def add_code(self, code: bytes) -> int_u32:
         pos = self.__code_length

@@ -1,24 +1,25 @@
 from contextlib import contextmanager, AbstractContextManager
 from contextvars import ContextVar, Token as ContextVarToken
-from dataclasses import dataclass
+from dataclasses import dataclass, InitVar
 from enum import Enum
 from logging import getLogger
 from typing import ContextManager, Generator, Iterable, Iterator, Optional, Any
+from io import SEEK_CUR
 
-from ..types import ARRAY_TYPE, STR_ARRAY_TYPE, VOID_TYPE, FloatType, GenericType, IntType, TypeBase
-from ..types.integral_types import *
-from ..virtual_machine.bytecode import (BytecodeTypes, NumericTypes, OpcodeEnum, _encode_f32, _encode_numeric,
-                                        _encode_u8, int_u8, int_i16)
-from ..virtual_machine.bytecode.builder import BytecodeBuilder
-from ..virtual_machine.bytecode.structures import *
-from . import CompilerNotice
-from .analyzer.checks._check_conversion import _check_conversion
-from .analyzer.scope import _CURRENT_ANALYZER_SCOPE, AnalyzerScope, StaticVariableDecl
-from .analyzer.static_type import type_from_lex
-from .lexer import (Declaration, Identifier, Identity, Lex, LexedLiteral, Operator, ParamList, ReturnStatement, Scope,
-                    Statement, Expression, Atom, Operator, IfStatement)
-from .tokenizer import Token, TokenType
-from .util import is_sequence_of, collect_returning_generator
+from ...types import ARRAY_TYPE, STR_ARRAY_TYPE, VOID_TYPE, FloatType, GenericType, IntType, TypeBase
+from ...types.integral_types import *
+from ...virtual_machine.bytecode import (BytecodeTypes, NumericTypes, OpcodeEnum, _encode_f32, _encode_numeric,
+                                         _encode_u8, int_u8, int_i16, _encode_u16, int_u64)
+from ...virtual_machine.bytecode.builder import BytecodeBuilder
+from ...virtual_machine.bytecode.structures import *
+from .. import CompilerNotice
+from ..analyzer.checks._check_conversion import _check_conversion
+from ..analyzer.scope import _CURRENT_ANALYZER_SCOPE, AnalyzerScope, StaticVariableDecl
+from ..analyzer.static_type import type_from_lex
+from ..lexer import (Declaration, Identifier, Identity, Lex, LexedLiteral, Operator, ParamList, ReturnStatement, Scope,
+                     Statement, Expression, Atom, Operator, IfStatement, ExpList)
+from ..tokenizer import Token, TokenType
+from ..util import is_sequence_of, collect_returning_generator
 
 _LOG = getLogger(__package__)
 
@@ -40,18 +41,32 @@ class CompileScope(ContextManager):
     _reset_tok: ContextVarToken | None = None
     _reset_static_tok: ContextVarToken | None = None
     static_scope: AnalyzerScope
+    deps: list['Dependency'] | None = None
 
     def __init__(self, name: str, root=False):
         self.name = name
+        if root:
+            self.deps = []
         self.parent = CompileScope.current() if not root else None
         if self.parent is None:
             self.static_scope = AnalyzerScope.current()
         else:
             static_scope = self.parent.static_scope.get_child(name)
             if static_scope is None:
-                raise RuntimeError()
+                raise RuntimeError(f"Could not find sub-scope `{name}` under `{self.parent.static_scope.fqdn}`")
             self.static_scope = static_scope
             assert self.static_scope is not None
+
+    def add_dep(self, dep: 'Dependency') -> None:
+        if self.parent is None:
+            assert self.deps is not None
+            self.deps.append(dep)
+            return
+        parent = self
+        while parent.parent is not None:
+            parent = parent.parent
+        assert parent.deps is not None
+        parent.add_dep(dep)
 
     def __enter__(self):
         self._reset_tok = _CURRENT_COMPILE_SCOPE.set(self)
@@ -78,6 +93,18 @@ class CompileScope(ContextManager):
             p = p.parent
         return '.'.join(reversed(names))
 
+    @contextmanager
+    def enter_recursive(self, *fqdn_parts: str):
+        from contextlib import ExitStack
+        if fqdn_parts:
+            with ExitStack() as es:
+                for part in fqdn_parts:
+                    last = CompileScope(part)
+                    es.enter_context(last)
+                yield last
+        else:
+            yield self
+
 
 @contextmanager
 def enter_global_scope(scope: CompileScope):
@@ -89,6 +116,7 @@ def enter_global_scope(scope: CompileScope):
 
 
 class FunctionScope(CompileScope):
+    func_id: int_u16
     args: dict[str, TypeBase]
     locals: dict[str, TypeBase]
     decls: dict[str, TypeBase]
@@ -96,10 +124,12 @@ class FunctionScope(CompileScope):
 
     def __init__(self,
                  name: str,
+                 func_id: int_u16,
                  returns: TypeBase,
                  args: dict[str, TypeBase] | None = None,
                  decls: dict[str, TypeBase] | None = None) -> None:
         super().__init__(name)
+        self.func_id = func_id
         self.returns = returns
         self.args = args or {}
         self.decls = decls or {}
@@ -204,19 +234,30 @@ def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
 
     main_func: BytecodeFunction
     global_compile_scope = CompileScope('<ROOT>', True)
+    main_func_id = _BUILDER.reserve_function(_BUILDER.add_string('main'))
     with enter_global_scope(global_compile_scope):
         try:
-            main_func = compile_func(main)
+            main_func = compile_func(main_func_id, main)
+            _BUILDER.fulfill_function_reservation(main_func_id, main_func)
         except CompilerNotice as ex:
             yield ex
             return None
-        # ret = b''.join(to_bytes(main_func.encode()))
-        # func, x = BytecodeFunction.decode(ret)
-        # for block in func.content:
-        #     print("Block:")
-        #     for line in block.content:
-        #         print(f"\tLine: {line.content!r}")
-        _BUILDER.add_function(main_func)
+
+        while global_compile_scope.deps:
+            x = global_compile_scope.deps.pop()
+            match x:
+                case DependantFunction():
+                    try:
+                        assert x.decl.fqdn is not None
+                        with global_compile_scope.enter_recursive(*x.decl.fqdn.split('.')[:-1]):
+                            _BUILDER.fulfill_function_reservation(x.id_, compile_func(x.id_, x.decl))
+                    except CompilerNotice as ex:
+                        yield ex
+                        return None
+
+                case _:
+                    raise NotImplementedError()
+
         ret = _BUILDER.finalize(entrypoint=main_func.address)
 
     return ret
@@ -227,17 +268,18 @@ class Storage(Enum):
     Locals = 'locals'
     Heap = 'heap'
     Stack = 'stack'
+    Static = 'static'
 
 
 @dataclass(slots=True)
 class StorageDescriptor:
-
     storage: Storage
-    type: TypeBase
+    type: TypeBase | AnalyzerScope
+    decl: StaticVariableDecl | None = None
     slot: int | None = None
 
     def __post_init__(self) -> None:
-        assert isinstance(self.type, TypeBase)
+        assert isinstance(self.type, (TypeBase, AnalyzerScope))
 
 
 @dataclass(slots=True)
@@ -260,7 +302,17 @@ def _storage_type_of(name: str, loc: SourceLocation) -> StorageDescriptor:
     for k, v in current_fn.decls.items():
         if k == name:
             return StorageDescriptor(Storage.Locals, v, slot=None)
-    raise CompilerNotice('Error', f"Cannot find `{name}` in `{current_fn.fqdn}`.", loc)
+
+    res = current_fn.static_scope.in_scope(name)
+    if res is None:
+        raise CompilerNotice('Error', f"Cannot find `{name}` (in `{current_fn.fqdn}`).", loc)
+
+    if isinstance(res, AnalyzerScope):
+        return StorageDescriptor(Storage.Static, res)
+    if isinstance(res, StaticVariableDecl):
+        return StorageDescriptor(Storage.Static, res.type, decl=res)
+
+    raise CompilerNotice('Error', f"Cannot find `{name}` (in `{current_fn.fqdn}`).", loc)
 
 
 def retrieve(from_: StorageDescriptor, buffer: BytesIO, loc: SourceLocation) -> StorageDescriptor:
@@ -289,7 +341,7 @@ def compile_expression(expression: Lex,
         case LexedLiteral():
             value = expression.to_value()
             match value, want:
-                case bool(), BOOL_TYPE:
+                case bool(), _ if want == BOOL_TYPE:
                     write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.bool, b'\x01' if value else b'\x00')
                     return StorageDescriptor(Storage.Stack, BOOL_TYPE)
                 case float(), None:
@@ -301,7 +353,9 @@ def compile_expression(expression: Lex,
                     return StorageDescriptor(Storage.Stack, F32_TYPE)
                 case int(), None:
                     # TODO: best int type for literal
-                    pass
+                    rtype, *bits = NumericTypes.best_value(value)
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, *bits)
+                    return StorageDescriptor(Storage.Stack, rtype)
                 case int(), _ if want == U8_TYPE:
                     #input(f"{want.name} -> {U8_TYPE.name}")
                     write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.u8, _encode_numeric(value, int_u8))
@@ -310,6 +364,10 @@ def compile_expression(expression: Lex,
                     #input(f"{want.name} -> {U8_TYPE.name}")
                     write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.u32, _encode_numeric(value, int_u32))
                     return StorageDescriptor(Storage.Stack, U32_TYPE)
+                case int(), _ if want == U64_TYPE:
+                    #input(f"{want.name} -> {U8_TYPE.name}")
+                    write_to_buffer(buffer, OpcodeEnum.PUSH_LITERAL, NumericTypes.u64, _encode_numeric(value, int_u64))
+                    return StorageDescriptor(Storage.Stack, U64_TYPE)
                 case int(), IntType():
                     raise NotImplementedError(f"Unknown inttype `{want.name}`.")
             raise NotImplementedError(
@@ -337,6 +395,28 @@ def compile_expression(expression: Lex,
                         return lhs_storage
                 case _:
                     raise NotImplementedError()
+        case Operator(oper=Token(type=TokenType.Equality)):
+            assert expression.lhs is not None
+            assert expression.rhs is not None
+            lhs_storage = yield from compile_expression(expression.lhs, buffer)
+            assert isinstance(lhs_storage.type, TypeBase)
+            convert_to_stack(lhs_storage, lhs_storage.type, buffer, expression.lhs.location)
+            rhs_storage = yield from compile_expression(expression.rhs, buffer)
+            assert isinstance(rhs_storage.type, TypeBase)
+            convert_to_stack(rhs_storage, rhs_storage.type, buffer, expression.rhs.location)
+            write_to_buffer(buffer, OpcodeEnum.CMP)
+            return StorageDescriptor(Storage.Stack, BOOL_TYPE)
+        case Operator(oper=Token(type=TokenType.LessThan)):
+            assert expression.lhs is not None
+            assert expression.rhs is not None
+            lhs_storage = yield from compile_expression(expression.lhs, buffer)
+            assert isinstance(lhs_storage.type, TypeBase)
+            convert_to_stack(lhs_storage, lhs_storage.type, buffer, expression.lhs.location)
+            rhs_storage = yield from compile_expression(expression.rhs, buffer)
+            assert isinstance(rhs_storage.type, TypeBase)
+            convert_to_stack(rhs_storage, rhs_storage.type, buffer, expression.rhs.location)
+            write_to_buffer(buffer, OpcodeEnum.LESS)
+            return StorageDescriptor(Storage.Stack, BOOL_TYPE)
         case Operator(oper=Token(type=TokenType.Dot), rhs=Identifier()):
             _LOG.debug("...dot operator")
             # what is lhs?
@@ -348,6 +428,15 @@ def compile_expression(expression: Lex,
                 # _LOG.debug("...error")
                 raise CompilerNotice('Error', f"Couldn't resolve `{expression.lhs.value}` in {scope.fqdn}.",
                                      expression.location)
+            if lhs_storage.storage == Storage.Static:
+                # This is some sort of type or scope
+                if isinstance(lhs_storage.type, AnalyzerScope):
+                    member = lhs_storage.type.members[expression.rhs.value]
+                    if isinstance(member, AnalyzerScope):
+                        return StorageDescriptor(Storage.Static, member)
+                    return StorageDescriptor(Storage.Static, member.type, decl=member)
+                raise NotImplementedError()
+
             # Get left side somewhere we can access it
             lhs_storage = retrieve(lhs_storage, buffer, expression.lhs.location)
             # input(f'Ran retrieve, lhs storage is now {lhs_storage}')
@@ -493,6 +582,31 @@ def compile_expression(expression: Lex,
             storage_type = _storage_type_of(name, expression.location)
             assert storage_type is not None
             return storage_type
+        case Operator(oper=Token(type=TokenType.LParen)):
+            assert expression.lhs is not None
+            # resolve lhs type
+            lhs = yield from compile_expression(expression.lhs, buffer)
+            if lhs.storage == Storage.Static:
+                # foo
+                if lhs.decl is not None:
+                    func_decl = lhs.decl
+                    assert func_decl.type.callable is not None
+                    params, ret_type = func_decl.type.callable
+                    func = DependantFunction(buffer, func_decl)
+                    # TODO: push params
+                    if params != ():
+                        assert isinstance(expression.rhs, ExpList)
+                        assert len(expression.rhs.values) == len(params)
+                        for param_type, expr in zip(params, expression.rhs.values):
+                            ex_storage = yield from compile_expression(expr, buffer, want=param_type)
+                            convert_to_stack(ex_storage, param_type, buffer, expr.location)
+                        write_to_buffer(buffer, OpcodeEnum.INIT_ARGS, _encode_numeric(len(params), int_u8))
+                    write_to_buffer(buffer, OpcodeEnum.CALL, func.id())
+                    return StorageDescriptor(Storage.Stack, ret_type)
+                raise NotImplementedError(f"static {lhs.type.name}?")
+            if lhs.decl is not None:
+                raise NotImplementedError("non-static svd?")
+            raise NotImplementedError("Literally don't even know how we got here.")
         case Operator():
             raise CompilerNotice(
                 'Error',
@@ -501,6 +615,7 @@ def compile_expression(expression: Lex,
         case _:
             raise CompilerNotice('Error', f"Don't know how to compile expression `{type(expression).__name__}`!",
                                  expression.location)
+    raise NotImplementedError()
 
 
 def convert_to_stack(from_: StorageDescriptor,
@@ -514,13 +629,15 @@ def convert_to_stack(from_: StorageDescriptor,
             case Storage.Stack:
                 return
             case Storage.Locals:
-                # get slot
-                fn_scope = FunctionScope.current_fn()
-                assert fn_scope is not None and from_.slot is not None
+                assert from_.slot is not None
                 write_to_buffer(buffer, OpcodeEnum.PUSH_LOCAL, _encode_numeric(from_.slot, int_u8))
                 return
+            case Storage.Arguments:
+                assert from_.slot is not None
+                write_to_buffer(buffer, OpcodeEnum.PUSH_ARG, _encode_numeric(from_.slot, int_u8))
+                return
             case _:
-                raise NotImplementedError()
+                raise NotImplementedError(f"Don't know how to move a {from_.storage} onto the stack.")
     match from_.type, to_:
         case IntType(), IntType():
             write_to_buffer(buffer, OpcodeEnum.CHECKED_CONVERT if checked else OpcodeEnum.UNCHECKED_CONVERT,
@@ -583,6 +700,42 @@ class Label(AbstractContextManager):
         if __exc_type is None:
             self.link()
         return None
+
+
+@dataclass(slots=True)
+class Dependency:
+    on: BytesIO
+
+
+@dataclass(slots=True)
+class DependantFunction(Dependency):
+    decl: StaticVariableDecl
+    fqdn_id: int_u32 = field(init=False)
+    id_: int_u16 = field(init=False)
+
+    # @classmethod
+    # def from_decl(cls, on: BytesIO, decl: StaticVariableDecl) -> 'DependantFunction':
+    #     fqdn = decl.fqdn
+    #     match = next((x for x in CompileScope.current().deps
+    #                   if x.on is on and isinstance(x, DependantFunction) and x.decl.fqdn == fqdn), None)
+    #     return match or DependantFunction(on, decl)
+
+    def __post_init__(self) -> None:
+        fqdn = self.decl.fqdn
+        assert fqdn is not None
+        self.fqdn_id = _BUILDER.add_string(fqdn)
+        value = _BUILDER.function_map.get(self.fqdn_id, None)
+        if value is None:
+            value = _BUILDER.reserve_function(self.fqdn_id)
+            CompileScope.current().add_dep(self)
+        self.id_ = value
+
+    def id(self) -> bytes:
+        return _encode_u16(self.id_)
+
+    def _patch(self, patch_location: int) -> None:
+        self.on.seek(patch_location)
+        write_to_buffer(self.on, _encode_u16(self.id_))
 
 
 def _emit_if_head(term: Expression, buffer: BytesIO, next_case: Label) -> Iterator[TempSourceMap]:
@@ -656,6 +809,7 @@ def compile_statement(statement: Statement | IfStatement | Declaration | ReturnS
                       buffer: BytesIO) -> Iterator[TempSourceMap]:
     # scope = CompileScope.current()
     fn_scope = FunctionScope.current_fn()
+    assert fn_scope is not None
     _LOG.debug(f'Compiling statement: {str(statement).strip()}')
     # input()
     start = buffer.tell()
@@ -683,7 +837,13 @@ def compile_statement(statement: Statement | IfStatement | Declaration | ReturnS
                 return_storage = yield from compile_expression(statement.value, buffer, want=fn_ret)
                 _LOG.debug(f"...return_storage is {return_storage}")
                 convert_to_stack(return_storage, fn_ret, buffer, statement.value.location)
-            write_to_buffer(buffer, OpcodeEnum.RET)
+            assert fn_scope.func_id is not None
+            self_call = _encode_numeric(OpcodeEnum.CALL.value, int_u8) + _encode_u16(fn_scope.func_id)
+            if buffer.tell() >= 3 and buffer.seek(-3, SEEK_CUR) and buffer.read(3) == self_call:
+                buffer.seek(-3, SEEK_CUR)
+                write_to_buffer(buffer, OpcodeEnum.TAIL, self_call[1:])
+            else:
+                write_to_buffer(buffer, OpcodeEnum.RET)
             yield TempSourceMap(start, buffer.tell() - start, statement.location)
         case IfStatement():
             # evaluate thingy
@@ -701,7 +861,7 @@ def compile_blocks(statements: Iterable[Statement | Declaration | ReturnStatemen
         yield from compile_statement(statement, buffer)
 
 
-def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
+def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction:
     outer_scope = CompileScope.current()
 
     _LOG.debug(f'Compiling function {func.name}')
@@ -725,12 +885,14 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
 
     if element.is_fat_arrow:
         assert isinstance(element.initial, (Expression, Atom, Operator, Identifier, LexedLiteral))
-        with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
+        with FunctionScope(element.identity.lhs.value, func_id, func.type.callable[1], args=args,
                            decls=decls) as scope, BytesIO() as buffer:
             # TODO split in to branch-delimited blocks of code
-            return_storage, source_maps = collect_returning_generator(compile_expression(element.initial, buffer))
+            return_storage, source_maps = collect_returning_generator(
+                compile_expression(element.initial, buffer, func.type.callable[1]))
             start = buffer.tell()
             convert_to_stack(return_storage, func.type.callable[1], buffer, element.initial.location)
+
             write_to_buffer(buffer, OpcodeEnum.RET)
             for source_loc in source_maps:
                 source_locs.append(source_loc)
@@ -754,7 +916,7 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
             decls[x.identity.lhs.value] = decl_type
             i += 1
 
-        with FunctionScope(element.identity.lhs.value, func.type.callable[1], args=args,
+        with FunctionScope(element.identity.lhs.value, func_id, func.type.callable[1], args=args,
                            decls=decls) as scope, BytesIO() as buffer:
             # TODO split in to branch-delimited blocks of code
             for source_loc in compile_blocks(element.initial.content, buffer):
@@ -769,9 +931,9 @@ def compile_func(func: StaticVariableDecl) -> BytecodeFunction:
     signature = _BUILDER.add_type_type(func.type)
     address = _BUILDER.add_code(code)
 
-    # for loc in source_locs:
-    #     _BUILDER.add_source_map(loc.location, (loc.offset + address, loc.length))
+    for loc in source_locs:
+        _BUILDER.add_source_map(loc.location, (loc.offset + address, loc.length))
 
-    # _BUILDER.add_source_map(func.location, (address, len(code)))
+    _BUILDER.add_source_map(func.location, (address, len(code)))
 
     return BytecodeFunction(name, scope, signature, address)

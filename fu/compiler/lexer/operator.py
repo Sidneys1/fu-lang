@@ -13,6 +13,9 @@ PREFIX_BINDING_POWER: dict[str, tuple[None, int]] = {'-': (None, 10), '!': (None
 INFIX_BINDING_POWER: dict[str, tuple[int, int]] = {
     ',': (1, 2),
     '=': (3, 4),
+    '<': (3, 4),
+    '>': (3, 4),
+    '==': (3, 4),
     # ...
     '+': (5, 6),
     '-': (5, 6),
@@ -31,7 +34,8 @@ POSTFIX_BINDING_POWER: dict[str, tuple[int, None]] = {
 @dataclass(repr=False, slots=True, frozen=True)
 class Operator(Lex):
     """Add: Atom '+' Atom;"""
-    OPERATORS = (TokenType.Operator, TokenType.Dot, TokenType.LParen, TokenType.LBracket, TokenType.Equals)
+    OPERATORS = (TokenType.Operator, TokenType.Dot, TokenType.LParen, TokenType.LBracket, TokenType.Equals,
+                 TokenType.Equality, TokenType.LessThan, TokenType.GreaterThan)
     lhs: Union['Atom', 'Identifier', 'Operator', None]
     rhs: Union['Atom', 'Identifier', 'Operator', 'ExpList', None]
     oper: 'Token'

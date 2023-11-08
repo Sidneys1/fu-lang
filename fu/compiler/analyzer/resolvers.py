@@ -116,8 +116,8 @@ def resolve_type(element: Lex,
             if isinstance(element.lhs, LexedLiteral) and isinstance(element.rhs, LexedLiteral):
                 return resolve_literal_operation(element, want=want, want_signed=want_signed, warn=warn)
 
-            lhs_type = resolve_type(element.lhs)
-            rhs_type = resolve_type(element.rhs)
+            lhs_type = resolve_type(element.lhs, want=want)
+            rhs_type = resolve_type(element.rhs, want=want)
             if isinstance(lhs_type, StaticScope) or isinstance(rhs_type, StaticScope):
                 raise CompilerNotice('Error', "Cannot operate on scopes!", element.location)
 
@@ -167,6 +167,8 @@ def resolve_type(element: Lex,
             raise NotImplementedError()
         case Operator(oper=Token(type=TokenType.Equals)):
             return VOID_TYPE
+        case Operator(oper=Token(type=TokenType.Equality | TokenType.LessThan | TokenType.GreaterThan)):
+            return BOOL_TYPE
         case Identifier():
             ret = scope.in_scope(element.value)
             if ret is None:

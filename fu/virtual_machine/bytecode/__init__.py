@@ -144,6 +144,30 @@ class NumericTypes(Enum):
     def from_int_type(rhs: IntType):
         return NumericTypes[rhs.name]
 
+    @staticmethod
+    def best_value(value: int | float) -> tuple[TypeBase, 'NumericTypes', bytes]:
+        if isinstance(value, float):
+            raise NotImplementedError()
+        if value < 0:
+            raise NotImplementedError()
+        max_value = 255
+        bits = 1
+        while value > max_value:
+            max_value *= 2**8
+            bits *= 2
+            if bits > 8:
+                raise RuntimeError(f'No integer type wide enough to represent literal {value}.')
+        match bits:
+            case 1:
+                return U8_TYPE, NumericTypes.u8, _encode_numeric(value, int_u8)
+            case 2:
+                return U16_TYPE, NumericTypes.u16, _encode_numeric(value, int_u16)
+            case 4:
+                return U32_TYPE, NumericTypes.u32, _encode_numeric(value, int_u32)
+            case 8:
+                return U64_TYPE, NumericTypes.u64, _encode_numeric(value, int_u64)
+        raise NotImplementedError()
+
     def to_type(self) -> IntegralType:
         match self:
             case self.u8:
@@ -191,6 +215,7 @@ class ParamType(Enum):
     ParamType = auto(), 1, ...
     # NearBase = auto(), 1, int
     NumericType = auto(), 1, NumericTypes
+    FunctionId = auto(), 2, _decode_u16
     # u8 = auto(), 1, int
     # u16 = auto(), 2, _decode_u16
     # u32 = auto(), 4, _decode_u32
@@ -265,6 +290,7 @@ class OpcodeEnum(Enum):
 
     # Arguments
     PUSH_ARG = auto(), 'pusharg {}', 'push argument #{}', NumericTypes.u8
+    INIT_ARGS = auto(), 'initargs {}', 'pop {:,} values off the stack to pass to next call', NumericTypes.u8
 
     # Locals
     PUSH_LOCAL = auto(), 'pushlocal {}', 'push local #{}', NumericTypes.u8
@@ -281,6 +307,8 @@ class OpcodeEnum(Enum):
     UNCHECKED_CONVERT = auto(), 'uconv.{0.name}', 'pop, convert to `{0.name}` (unchecked), push', ParamType.NumericType
 
     # Control flow
+    CALL = auto(), 'call {0}', 'call function {0}', ParamType.FunctionId
+    TAIL = auto(), 'tail {0}', 'tail call function {0}', ParamType.FunctionId
     RET = auto(), 'ret', 'return'
     JMP = auto(), 'jmp {0:#02x}', 'jump {0:+}', NumericTypes.i16
     JZ = auto(), 'jz {0:#x}', 'pop from stack, jump if zero/false {0:+}', NumericTypes.i16
@@ -293,6 +321,10 @@ class OpcodeEnum(Enum):
     # # Control flow
     # CALL = auto(), (ParamType.u16, )
     # HALT_AND_CATCH_FIRE = auto()
+
+    # Comparison
+    CMP = auto(), 'cmp', 'pop two, compare equality, push boolean result'
+    LESS = auto(), 'less', 'pop two, push True if first value is less than the second'
 
     # # Arithmetic
     CHECKED_ADD = auto(), 'add.{0.name}', 'pop two, add into `{0.name}` (checked), push', ParamType.NumericType

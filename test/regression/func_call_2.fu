@@ -1,0 +1,5 @@
+test2: u8() => 22;
+
+test: u8() => test2() + 20;
+
+main: u8() => test();

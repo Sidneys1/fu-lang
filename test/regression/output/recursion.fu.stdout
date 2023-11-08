@@ -1,0 +1,5 @@
+----------- test\regression\recursion.fu -----------
+[2m   3 |   return y + foo(y [0;2m- 1[2m);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\recursion.fu:3:20-22)
+[0m[m[0;2m-----+[0m
+[2m   3 |   return y [0;2m+ foo(y - 1);[2m[0m[0;0m <-- Checks for infix operator '+' are not implemented! [0;2m(test\regression\recursion.fu:3:12-24)
+[0m[m

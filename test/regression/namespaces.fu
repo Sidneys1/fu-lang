@@ -1,0 +1,5 @@
+foo: namespace = {
+  test: u8() => 42;
+};
+
+main: u8() => foo.test();

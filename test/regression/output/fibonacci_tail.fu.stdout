@@ -1,0 +1,5 @@
+-------- test\regression\fibonacci_tail.fu --------
+[2m   6 |   return _fib(b, a [0;2m+ b[2m, n - 1);[0m[0;0m <-- Checks for infix operator '+' are not implemented! [0;2m(test\regression\fibonacci_tail.fu:6:20-22)
+[0m[m[0;2m-----+[0m
+[2m   6 |   return _fib(b, a + b, n [0;2m- 1[2m);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\fibonacci_tail.fu:6:27-29)
+[0m[m

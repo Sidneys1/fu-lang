@@ -1,0 +1,9 @@
+fib: u64(n: u64) => _fib(0, 1, n);
+
+_fib: u64(a: u64, b: u64, n: u64) = {
+  if (n < 1) return a;
+  if (n == 1) return b;
+  return _fib(b, a + b, n - 1);
+};
+
+main: u64() => fib(90); // 2,880,067,194,370,816,120

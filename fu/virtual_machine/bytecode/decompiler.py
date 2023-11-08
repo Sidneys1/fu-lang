@@ -3,7 +3,7 @@ from typing import Iterator
 
 from ...color import RESET, COMMENT, NUM, FUNC_NAME, FAINT, KEYWORD, PARAM, TEMPLATE, CONSTANT, TYPE
 
-from . import OpcodeEnum, _decode_u32
+from . import OpcodeEnum, _decode_u32, ParamType, int_u16
 from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
 
@@ -27,6 +27,13 @@ def _get_signature(func: BytecodeFunction, strings: bytes, types: list[BytecodeT
         return _get_string(t.name, stream)
 
 
+def _get_function_id(fn_id: int_u16, binary: BytecodeBinary) -> str:
+    scope, name = _get_fqdn(binary.functions[fn_id], binary.strings)
+    if not scope:
+        return name
+    return scope + '.' + name
+
+
 def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator[str]:
     with BytesIO(bytecode) as stream:
         pos = stream.tell()
@@ -37,6 +44,10 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
             opcode, args, raw = OpcodeEnum.decode_op(stream)
             if opcode is None:
                 break
+            if binary is not None:
+                args = tuple(
+                    _get_function_id(a, binary) if p == ParamType.FunctionId else a
+                    for p, a in zip(opcode.params, args))
             if last_opcode == OpcodeEnum.RET:
                 if binary is None:
                     yield f'       {FAINT}│                        │ {RESET + FUNC_NAME}<unknown>:{RESET}'
@@ -46,7 +57,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
                         fqdn, name = _get_fqdn(func, binary.strings)
                         fqdn = (fqdn + '.' + name) if fqdn else name
                         sig = _get_signature(func, binary.strings, binary.types)
-                        yield f"       {FAINT}│                   │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {name}: {sig} = {{ /* ... */ }}{RESET}"
+                        yield f"       {FAINT}│                               │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {name}: {sig} = {{ /* ... */ }}{RESET}"
 
             asm, explain = opcode.as_asm(*args)
             padding = ''
@@ -62,24 +73,27 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
             if '.' in op:
                 first, *rest = op.split('.')
                 param_count = len(rest)
-                op = f"{KEYWORD}{first}{RESET}.{TYPE}" + f'{RESET}.{TYPE}'.join(rest) + RESET
+                op = f"{KEYWORD}{first}{RESET}.{PARAM}" + f'{RESET}.{PARAM}'.join(rest) + RESET
             else:
                 op = KEYWORD + op + RESET
 
             asm = op
             if params:
-                asm += ' ' + CONSTANT + params + RESET
+                color = FUNC_NAME if opcode == OpcodeEnum.CALL else CONSTANT
+                asm += ' ' + color + params + RESET
             asm += padding
 
             hex_bytes = ' '.join(f'{x:02x}' for x in raw)
             padding = ''
-            if len(hex_bytes) < 17:
-                padding = ' ' * (17 - len(hex_bytes))
+            if len(hex_bytes) < 29:
+                padding = ' ' * (29 - len(hex_bytes))
             hb = hex_bytes.split(' ')
             hex_bytes = KEYWORD + hb[0] + RESET
             for i, b in enumerate(hb[1:]):
                 if i < param_count:
-                    hex_bytes += ' ' + TYPE + b
+                    hex_bytes += ' ' + PARAM + b
+                elif opcode == OpcodeEnum.CALL:
+                    hex_bytes += ' ' + FUNC_NAME + b
                 else:
                     hex_bytes += ' ' + CONSTANT + b
             hex_bytes += RESET

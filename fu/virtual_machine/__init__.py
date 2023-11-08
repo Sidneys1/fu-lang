@@ -13,10 +13,13 @@ _LOG = getLogger(__name__)
 
 T = TypeVar('T', bound=int)
 
+MAX_RECURSION = 50
+
 
 @dataclass(slots=True)
 class StackFrame:
     args: tuple[Any, ...]
+    return_address: int
     locals: list[Any] = field(init=False, default_factory=list)
     stack: list[Any] = field(init=False, default_factory=list)
 
@@ -53,9 +56,11 @@ class VM:
             self.exit_code = exit_code
 
     code: bytes
+    binary: BytecodeBinary
     ip = 0
 
     _stack_frames: list[StackFrame] = []
+    _build_args: None | tuple[Any, ...] = None
 
     heap: list[Any] = []
 
@@ -63,6 +68,7 @@ class VM:
         return '{' + ', '.join(f"@{i}: {v!r}" for i, v in enumerate(self.heap)) + '}'
 
     def __init__(self, binary: BytecodeBinary, args: list[str]):
+        self.binary = binary
         self.code = binary.bytecode
 
         assert binary.entrypoint is not None
@@ -72,7 +78,7 @@ class VM:
         for arg in args:
             arg_refs.append(Ref(len(self.heap)))
             self.heap.append(arg)
-        self._stack_frames.append(StackFrame((Ref(len(self.heap)), )))
+        self._stack_frames.append(StackFrame((Ref(len(self.heap)), ), -1))
         self.heap.append(Array(len(arg_refs), arg_refs))
 
         print(
@@ -83,7 +89,7 @@ class VM:
             print('%     ', line, sep='')
 
     def run(self):
-        input('% Press enter to run...')
+        # input('% Press enter to run...')
         start = perf_counter()
         extra = ''
         try:
@@ -92,7 +98,7 @@ class VM:
                     raise RuntimeError(f'Instruction pointer out of bounds ({self.ip:#06x})!')
                 self.step()
         except VM.VmTerminated as ex:
-            extra = f' with exit code {ex.exit_code}'
+            extra = f' with exit code {ex.exit_code:,}'
             raise
         finally:
             end = perf_counter()
@@ -134,8 +140,11 @@ class VM:
 
     def step(self) -> None:
         length, op, params = self.decode_op()
-        _LOG.debug(f"{self.ip:#04x}-{self.ip+length-1:#04x} {op.name}({params})")
         stack_frame = self._stack_frames[-1]
+        _LOG.debug(
+            f"Frame #{len(self._stack_frames):,}; Stack {stack_frame.stack}; Locals {stack_frame.locals}; Args: {stack_frame.args}; Init-Args: {self._build_args}"
+        )
+        _LOG.debug(f"\t{self.ip:#06x} {op.name}({params})")
 
         if op == OpcodeEnum.PUSH_ARG:
             # Push argument # onto the stack.
@@ -176,11 +185,12 @@ class VM:
         elif op == OpcodeEnum.RET:
             # Copy the last stack value from this frame and push it onto the last frame, then delete this frame.
             return_value = stack_frame.stack.pop() if stack_frame.stack else None
-            self._stack_frames.pop()
+            return_address = self._stack_frames.pop().return_address
             if not self._stack_frames:
                 assert return_value is None or isinstance(return_value, int), f"{return_value!r}"
                 raise VM.VmTerminated(return_value or 0)
             self._stack_frames[-1].stack.append(return_value)
+            self.ip = return_address
         elif op == OpcodeEnum.PUSH_LITERAL:
             # Push a literal onto the stack
             stack_frame.stack.append(params[1])
@@ -212,32 +222,49 @@ class VM:
             }[op](lhs, rhs)
             if isinstance(n_type, IntType):
                 min_, max_ = n_type.range()
-                if min_ > val > max_:
+                if min_ > val or val > max_:
+                    raise RuntimeError("Integer over/underflow!")
                     # TODO: checked exception
                     pass
             stack_frame.stack.append(val)
             self.ip += length
         elif op == OpcodeEnum.JMP:
-            target: int_u16 = params[0]
-            self.ip = target
+            self.ip = params[0]
+        elif op == OpcodeEnum.CALL:
+            # Create new stack frame
+            if len(self._stack_frames) == MAX_RECURSION:
+                raise RuntimeError("Maximum recursion depth reached.")
+            self._stack_frames.append(StackFrame(self._build_args or (), self.ip + length))
+            self._build_args = None
+            # Jump to function
+            self.ip = self.binary.functions[params[0]].address
+        elif op == OpcodeEnum.TAIL:
+            # reuse stack frame
+            stack_frame.args = self._build_args or ()
+            stack_frame.return_address = self.ip + length
+            stack_frame.stack.clear()
+            self._build_args = None
+            # Jump to function
+            self.ip = self.binary.functions[params[0]].address
         elif op == OpcodeEnum.JZ:
             # Jump only if top of stack is zero
             top_stack = stack_frame.stack[-1]
             if top_stack in (0, False):
-                target = params[0]
-                self.ip += target
+                self.ip += params[0]
+            self.ip += length
+        elif op == OpcodeEnum.INIT_ARGS:
+            arg_pack = []
+            for _ in range(params[0]):
+                arg_pack.append(stack_frame.stack.pop())
+            self._build_args = tuple(reversed(arg_pack))
+            self.ip += length
+        elif op == OpcodeEnum.CMP:
+            stack_frame.stack.append(stack_frame.stack.pop() == stack_frame.stack.pop())
+            self.ip += length
+        elif op == OpcodeEnum.LESS:
+            right = stack_frame.stack.pop()
+            left = stack_frame.stack.pop()
+            stack_frame.stack.append(left < right)
             self.ip += length
         else:
             raise NotImplementedError(f"Opcode {op.name} is not supported! At: {self.ip:#04x}.")
-
-        _LOG.debug(f"\tAfter: Stack {stack_frame.stack}; Locals {stack_frame.locals}")
-
-
-"""
-push retaddr [retaddr]
-push 1 [retaddr, 1]
-push 2 [retaddr, 1, 2]
-call foo
-add i8 i8 [retaddr] (3)
-return []
-"""

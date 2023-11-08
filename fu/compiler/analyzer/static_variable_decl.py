@@ -13,8 +13,9 @@ class StaticVariableDecl:
     """Describes the declaration of a variable during static analysis."""
     type: TypeBase
     lex: Declaration | Identity | TypeDeclaration
+    fqdn: str | None = field(default=None, kw_only=True)
     parent: Self | None = field(default=None, kw_only=True)
-    member_decls: dict[str, Self] = field(default_factory=dict, kw_only=True)
+    member_decls: dict[str, 'StaticVariableDecl'] = field(default_factory=dict, kw_only=True)
 
     def __post_init__(self):
         assert isinstance(self.type, TypeBase)
@@ -23,7 +24,9 @@ class StaticVariableDecl:
     def location(self) -> SourceLocation:
         if isinstance(self.lex, TypeDeclaration):
             return self.lex.name.location
-        return self.lex.identity.location
+        if isinstance(self.lex, Declaration):
+            return self.lex.identity.location
+        return self.lex.location
 
     @property
     def name(self) -> str:
