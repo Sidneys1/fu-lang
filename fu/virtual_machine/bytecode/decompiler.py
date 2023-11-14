@@ -34,7 +34,16 @@ def _get_function_id(fn_id: int_u16, binary: BytecodeBinary) -> str:
     return scope + '.' + name
 
 
-def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator[str]:
+def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_function: bool = False) -> Iterator[str]:
+    if single_function and binary is None:
+        raise ValueError("Cannot print single function if binary is not provided")
+
+    functions: dict[int, tuple[str, str]] = {}
+    if binary:
+        for func in binary.functions:
+            fqdn, name = _get_fqdn(func, binary.strings)
+            fqdn = (fqdn + '.' + name) if fqdn else name
+            functions[func.address] = fqdn, f"{name}: {_get_signature(func, binary.strings, binary.types)}"
     with BytesIO(bytecode) as stream:
         pos = stream.tell()
         opcode: OpcodeEnum | None = OpcodeEnum.RET
@@ -48,16 +57,11 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
                 args = tuple(
                     _get_function_id(a, binary) if p == ParamType.FunctionId else a
                     for p, a in zip(opcode.params, args))
-            if last_opcode == OpcodeEnum.RET:
-                if binary is None:
-                    yield f'       {FAINT}│                        │ {RESET + FUNC_NAME}<unknown>:{RESET}'
-                elif binary is not None:
-                    func = next((x for x in binary.functions if x.address == last_pos), None)
-                    if func is not None:
-                        fqdn, name = _get_fqdn(func, binary.strings)
-                        fqdn = (fqdn + '.' + name) if fqdn else name
-                        sig = _get_signature(func, binary.strings, binary.types)
-                        yield f"       {FAINT}│                               │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {name}: {sig} = {{ /* ... */ }}{RESET}"
+            if last_opcode == OpcodeEnum.RET and pos in functions:
+                if single_function:
+                    return
+                fqdn, sig = functions[pos]
+                yield f"       {FAINT}│                               │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {sig} = {{ /* ... */ }}{RESET}"
 
             asm, explain = opcode.as_asm(*args)
             padding = ''
@@ -79,7 +83,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
 
             asm = op
             if params:
-                color = FUNC_NAME if opcode == OpcodeEnum.CALL else CONSTANT
+                color = FUNC_NAME if opcode == OpcodeEnum.CALL_EXPORT else CONSTANT
                 asm += ' ' + color + params + RESET
             asm += padding
 
@@ -92,7 +96,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None) -> Iterator
             for i, b in enumerate(hb[1:]):
                 if i < param_count:
                     hex_bytes += ' ' + PARAM + b
-                elif opcode == OpcodeEnum.CALL:
+                elif opcode == OpcodeEnum.CALL_EXPORT:
                     hex_bytes += ' ' + FUNC_NAME + b
                 else:
                     hex_bytes += ' ' + CONSTANT + b

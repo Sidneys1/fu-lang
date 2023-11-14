@@ -1,1 +1,2 @@
 x x x x x x Failed to lex `Identity`: Expected Colon
+INFO:fu.compiler:Output binary `a.out`: 591 Bytes

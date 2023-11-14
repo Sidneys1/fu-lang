@@ -1,0 +1,14 @@
+msvcrt: extern('C') = {
+  printf: i32(format: str);
+  scanf<T>: i32(format: str, param: out );
+};
+
+read_line: str() = {
+  buffer: u8[100];
+  success: i32 = msvcrt.scanf("%s", buffer);
+  return buffer;
+};
+
+main: void(args: str[]) = {
+  msvcrt.printf(args[0]);
+};

@@ -307,10 +307,16 @@ class OpcodeEnum(Enum):
     UNCHECKED_CONVERT = auto(), 'uconv.{0.name}', 'pop, convert to `{0.name}` (unchecked), push', ParamType.NumericType
 
     # Control flow
-    CALL = auto(), 'call {0}', 'call function {0}', ParamType.FunctionId
-    TAIL = auto(), 'tail {0}', 'tail call function {0}', ParamType.FunctionId
+    CALL_EXPORT = auto(), 'call.export {0}', 'call exported function {0}', ParamType.FunctionId
+    CALL_IMPORT = auto(), 'call.import {0}', 'call imported function {0}', ParamType.FunctionId
+    CALL = auto(), 'call {0:#06x}', 'call function at {0:#06x}', NumericTypes.u32
+
+    TAIL_EXPORT = auto(), 'tail.export {0}', 'tail call exported function {0}', ParamType.FunctionId
+    TAIL_IMPORT = auto(), 'tail.import {0}', 'tail call imported function {0}', ParamType.FunctionId
+    TAIL = auto(), 'tail {0:#06x}', 'tail call function at {0:#06x}', NumericTypes.u32
+
     RET = auto(), 'ret', 'return'
-    JMP = auto(), 'jmp {0:#02x}', 'jump {0:+}', NumericTypes.i16
+    JMP = auto(), 'jmp {0:#x}', 'jump {0:+}', NumericTypes.i16
     JZ = auto(), 'jz {0:#x}', 'pop from stack, jump if zero/false {0:+}', NumericTypes.i16
 
     # # Stack and accumulator
@@ -354,6 +360,6 @@ def to_bytes(in_: Iterator[BytecodeTypes]) -> Iterator[int]:
             case bytes():
                 yield from x
             case bool():
-                yield 1 if x else 0
+                yield from _encode_bool(x)
             case _:
                 yield x

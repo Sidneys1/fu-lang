@@ -1,22 +1,22 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from io import BytesIO
+from io import BytesIO, IOBase
 from typing import Generic, Iterator, NewType, Self, Sequence, TypeVar, Union
 
 from .. import BytecodeTypes, _encode_f32, _encode_u8, int_u8, _encode_numeric, int_u32, float_f32
 
 
-@dataclass(frozen=True, kw_only=True, slots=True)
 class BytecodeBase(ABC):  # type: ignore[misc]
     """Base class for all bytecode structures."""
 
     @classmethod
-    def decode(cls, stream: BytesIO) -> tuple[Self, bytes]:
+    def decode(cls, stream: IOBase) -> Self:
         raise NotImplementedError()
 
-    def encode(self) -> Iterator[bytes]:
-        yield from _to_bytes(self._encode())
+    def encode(self, stream: IOBase) -> None:
+        for x in _to_bytes(self._encode()):
+            stream.write(x)
 
     @abstractmethod
     def _encode(self) -> Iterator[Union[BytecodeTypes, 'BytecodeBase']]:
@@ -26,7 +26,6 @@ class BytecodeBase(ABC):  # type: ignore[misc]
 T = TypeVar('T', bound=BytecodeBase)
 
 
-@dataclass(frozen=True, kw_only=True, slots=True)
 class BytecodeContainer(Generic[T], BytecodeBase, ABC):  # type: ignore[misc]
     """A simple bytecode type that just contains other types."""
     content: Sequence[T] = field(default_factory=list)
@@ -44,11 +43,11 @@ from .types import *
 
 def _to_bytes(in_: Iterator[BytecodeTypes | BytecodeBase], silent=False) -> Iterator[bytes]:
     for x in in_:
-        if not silent:
-            print(f"Bytecode Structure to-bytes: {x}")
+        # if not silent:
+        #     print(f"Bytecode Structure to-bytes: {x}")
         match x:
             case BytecodeBase():
-                yield from x.encode()
+                yield from _to_bytes(x._encode())
             case tuple():
                 yield from _to_bytes((y for y in x), silent=True)
             case Enum():

@@ -258,6 +258,7 @@ def compile() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
                 case _:
                     raise NotImplementedError()
 
+        assert isinstance(main_func.address, int), f"main_func.address is an `{type(main_func.address).__name__}`"
         ret = _BUILDER.finalize(entrypoint=main_func.address)
 
     return ret
@@ -601,7 +602,7 @@ def compile_expression(expression: Lex,
                             ex_storage = yield from compile_expression(expr, buffer, want=param_type)
                             convert_to_stack(ex_storage, param_type, buffer, expr.location)
                         write_to_buffer(buffer, OpcodeEnum.INIT_ARGS, _encode_numeric(len(params), int_u8))
-                    write_to_buffer(buffer, OpcodeEnum.CALL, func.id())
+                    write_to_buffer(buffer, OpcodeEnum.CALL_EXPORT, func.id())
                     return StorageDescriptor(Storage.Stack, ret_type)
                 raise NotImplementedError(f"static {lhs.type.name}?")
             if lhs.decl is not None:
@@ -838,10 +839,10 @@ def compile_statement(statement: Statement | IfStatement | Declaration | ReturnS
                 _LOG.debug(f"...return_storage is {return_storage}")
                 convert_to_stack(return_storage, fn_ret, buffer, statement.value.location)
             assert fn_scope.func_id is not None
-            self_call = _encode_numeric(OpcodeEnum.CALL.value, int_u8) + _encode_u16(fn_scope.func_id)
-            if buffer.tell() >= 3 and buffer.seek(-3, SEEK_CUR) and buffer.read(3) == self_call:
+            if buffer.tell() >= 3 and buffer.seek(
+                    -3, SEEK_CUR) and (last := buffer.read(3)) and last[0] == OpcodeEnum.CALL_EXPORT.value:
                 buffer.seek(-3, SEEK_CUR)
-                write_to_buffer(buffer, OpcodeEnum.TAIL, self_call[1:])
+                write_to_buffer(buffer, OpcodeEnum.TAIL_EXPORT, last[1:])
             else:
                 write_to_buffer(buffer, OpcodeEnum.RET)
             yield TempSourceMap(start, buffer.tell() - start, statement.location)
@@ -892,8 +893,12 @@ def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction
                 compile_expression(element.initial, buffer, func.type.callable[1]))
             start = buffer.tell()
             convert_to_stack(return_storage, func.type.callable[1], buffer, element.initial.location)
-
-            write_to_buffer(buffer, OpcodeEnum.RET)
+            if buffer.tell() >= 3 and buffer.seek(
+                    -3, SEEK_CUR) and (last := buffer.read(3)) and last[0] == OpcodeEnum.CALL_EXPORT.value:
+                buffer.seek(-3, SEEK_CUR)
+                write_to_buffer(buffer, OpcodeEnum.TAIL_EXPORT, last[1:])
+            else:
+                write_to_buffer(buffer, OpcodeEnum.RET)
             for source_loc in source_maps:
                 source_locs.append(source_loc)
             source_locs.append(TempSourceMap(start, buffer.tell() - start, element.initial.location))

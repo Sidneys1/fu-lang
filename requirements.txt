@@ -3,3 +3,4 @@ mypy
 yapf
 pylint
 pytest
+humanize

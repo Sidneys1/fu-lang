@@ -5,7 +5,7 @@ from types import EllipsisType
 from ...compiler import SourceLocation
 from ...types import VOID_TYPE, TypeBase
 from . import _encode_numeric, _encode_u32, _to_bytecode_numeric, int_u16, int_u32
-from .structures import BuiltinTypes, BytecodeBinary, BytecodeFunction, BytecodeType
+from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
 
 class BytecodeBuilder:
@@ -39,8 +39,14 @@ class BytecodeBuilder:
 
     def finalize(self, entrypoint: int_u32 | None) -> BytecodeBinary:
         assert all(isinstance(x, BytecodeFunction) for x in self.__functions)
-        return BytecodeBinary(entrypoint, b''.join(self.__code), self.__types, self.__strings_buffer.getvalue(),
-                              self.__functions, self.__source_map)
+        assert not any(x is Ellipsis for x in self.__functions)
+        return BytecodeBinary(
+            b''.join(self.__code),
+            self.__strings_buffer.getvalue(),
+            self.__types,
+            self.__functions,  # type: ignore
+            entrypoint,
+            self.__source_map)
 
     def _add_type(self, type_: BytecodeType) -> int_u16:
         # TODO: recursively check...
@@ -52,8 +58,8 @@ class BytecodeBuilder:
 
     def add_type_type(self, type_: TypeBase) -> int_u16:
         if type_ == VOID_TYPE:
-            return self._add_type(BytecodeType(BuiltinTypes.void))
-        return self._add_type(BytecodeType(builder=self, underlying=type_))
+            return self._add_type(BytecodeType(type_=BytecodeType.Type.VOID))
+        return self._add_type(BytecodeType.from_type(self, type_))
 
     def add_string(self, string: str) -> int_u32:
         if string not in self.__strings:

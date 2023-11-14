@@ -1,0 +1,30 @@
+
+
+main: void() = {
+  embed "asm" {
+    movq $60, %rax
+    movq $2, %rdi
+    syscall
+  };
+};
+
+[Native("x86_64")]
+enter_protected_mode: void() = {
+  embed "asm_x86_64" {
+    cli
+    lgdt [gdtr]
+    mov eax, cr0
+    or al, 1
+    mov cr0, eax
+    jmp 08h:PModeMain
+  };
+};
+
+[Unsafe]
+print_to_vga_buffer: void(text: str) = {
+  vga_buffer: *(u8[]) = 0xb8000;
+  text | enumerate | (i: usize_t, c: u8) => {
+    vga_buffer[i * 2] = c;
+    vga_buffer[i * 2 + 1] = 0xb;
+  };
+};
