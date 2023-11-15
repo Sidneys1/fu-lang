@@ -1,14 +1,39 @@
-msvcrt: extern('C') = {
-  printf: i32(format: str);
-  scanf<T>: i32(format: str, param: out );
+// extern_c linkage is inherently unsafe, pointer types allowed.
+msvcrt: extern_c = {
+  puts: int(buffer: *u8);
+  gets_s: *u8(buffer: *u8, size: i32);
 };
 
-read_line: str() = {
-  buffer: u8[100];
-  success: i32 = msvcrt.scanf("%s", buffer);
-  return buffer;
-};
+[Unsafe] // Allows use of pointers.
+read_line: bool(buffer: u8[])
+  // Why is this unsafe? Because we devolve an array into a native pointer.
+  // How do we assert that this is OK?
+  // * `buffer.length` needs to fit in a i32.
+  assumes(buffer.length)
+  // * Buffer won't be null (it's coming in as managed) (ok).
+  // * The return pointer never leaves the function (ok).
+  => msvcrt.gets_s(buffer, buffer.length) != nullptr;
 
+[Unsafe] // Allows us to call other unsafe functions, get addresses of things.
 main: void(args: str[]) = {
-  msvcrt.printf(args[0]);
+  msvcrt.puts(&args[0]);
 };
+
+// Allows us to use unsafe types (pointers).
+// BUT marks the whole function as unsafe.
+[Unsafe]
+func: void();
+
+func: void() = {
+  buffer: u8[1024];
+  success: bool;
+  // Marks this block as unsafe (pointers allowed).
+  // Does not make the whole function unsafe.
+  // Should be surrounded by assumption assertions.
+  [Unsafe] {
+    success = read_line(buffer);
+  }
+
+  assert(buffer)
+};
+buffer:
