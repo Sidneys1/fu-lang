@@ -1,7 +1,7 @@
 from contextlib import ExitStack
 from typing import Iterator
 
-from ...types.composed_types.generic_types.type_ import TypeType
+from ...types.composed_types.generic_types.type_ import StaticType
 from .. import CompilerNotice
 from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_, TypeDeclaration
 from . import _LOG
@@ -107,7 +107,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
 
             if isinstance(element.definition, Type_):
-                scope.members[name] = StaticVariableDecl(TypeType.of(type_from_lex(element.definition, scope)),
+                scope.members[name] = StaticVariableDecl(StaticType(type_from_lex(element.definition, scope)),
                                                          element,
                                                          fqdn=(scope.fqdn + '.' +
                                                                name) if scope.parent is not None else name)
@@ -181,7 +181,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 except CompilerNotice as ex:
                     yield ex
                 else:
-                    if isinstance(var_type, TypeType) and rhs_type == var_type.underlying:
+                    if isinstance(var_type, StaticType) and rhs_type == var_type.underlying:
                         var_type = var_type.underlying
                     elif var_type != rhs_type:
                         allowed = yield from _check_conversion(rhs_type, var_type, element.initial.location)

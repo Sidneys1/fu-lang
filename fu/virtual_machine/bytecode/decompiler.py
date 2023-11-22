@@ -3,7 +3,9 @@ from typing import Iterator
 
 from ...color import RESET, COMMENT, NUM, FUNC_NAME, FAINT, KEYWORD, PARAM, TEMPLATE, CONSTANT, TYPE
 
-from . import OpcodeEnum, _decode_u32, ParamType, int_u16
+from ...compiler import SourceLocation
+
+from . import OpcodeEnum, _decode_u32, ParamType, int_u16, int_u32
 from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
 
@@ -39,6 +41,9 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_func
         raise ValueError("Cannot print single function if binary is not provided")
 
     functions: dict[int, tuple[str, str]] = {}
+    longest_path = max(len(str(x))
+                       for x in binary.source_map) if binary is not None and binary.source_map is not None else 0
+
     if binary:
         for func in binary.functions:
             fqdn, name = _get_fqdn(func, binary.strings)
@@ -49,7 +54,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_func
         opcode: OpcodeEnum | None = OpcodeEnum.RET
         while True:
             last_opcode = opcode
-            last_pos = pos
+            # last_pos = pos
             opcode, args, raw = OpcodeEnum.decode_op(stream)
             if opcode is None:
                 break
@@ -102,6 +107,24 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_func
                     hex_bytes += ' ' + CONSTANT + b
             hex_bytes += RESET
 
-            yield (f"{FAINT}{pos:#06x} │ {RESET + NUM}{hex_bytes + padding} "
+            range_: str = ''
+            end = stream.tell()
+            if binary is not None and binary.source_map is not None:
+                best: tuple[SourceLocation, tuple[int_u32, int_u32]] | None = None
+                for (s, l), k in binary.source_map.items():
+                    if s > pos or (s + l) < end:
+                        continue
+                    # print(f"{pos:#06x}-{end:#06x} is in {s:#06x}-{s+l:#06x}")
+                    if best is None:
+                        best = k, (s, l)
+                        continue
+                    bl = best[1][1]
+                    if l < bl:
+                        # print(f"{l:,} < {bl:,}")
+                        best = k, (s, l)
+                if best is not None:
+                    range_ = f"{str(best[0]).ljust(longest_path)} │ "
+
+            yield (f"{FAINT}{range_} {pos:#06x} │ {RESET + NUM}{hex_bytes + padding} "
                    f"{RESET + FAINT}│{RESET}   {asm} {COMMENT}; {explain}{RESET}")
-            pos = stream.tell()
+            pos = end

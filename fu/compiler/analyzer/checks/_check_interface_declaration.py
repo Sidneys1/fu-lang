@@ -1,6 +1,6 @@
 from typing import Iterator
 
-from ....types import InterfaceType, ThisType, TypeType
+from ....types import InterfaceType, ThisType, StaticType
 from ... import CompilerNotice
 from ...lexer import CompilerNotice, Declaration, Identity, Type_, TypeDeclaration
 from .. import _mark_checked_recursive
@@ -32,7 +32,7 @@ def _check_interface_declaration(element: TypeDeclaration) -> Iterator[CompilerN
             case Declaration(identity=Identity()) if elem.initial is None and elem.identity.lhs.value == 'this':
                 # Special case - inheritance
                 inherits_decl = decl_of(elem.identity.rhs)
-                assert isinstance(inherits_decl.type, TypeType)
+                assert isinstance(inherits_decl.type, StaticType)
                 inherits_type = inherits_decl.type.underlying
                 if not isinstance(inherits_type, InterfaceType):
                     # Interface is inheriting something other than an interface.

@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Iterator
 
-from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, TypeType, InterfaceType
+from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, StaticType, InterfaceType
 from .. import CompilerNotice
 from ..analyzer.resolvers import resolve_type
 from ..analyzer.scope import AnalyzerScope
@@ -170,7 +170,7 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                    size=None,
                                    reference_type=True,
                                    inherits=inherits,
-                                   members=members,
+                                   instance_members=members,
                                    special_operators=special_operators,
                                    generic_params=generic_params)
         else:
@@ -178,10 +178,10 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                     size=None,
                                     reference_type=True,
                                     inherits=inherits,
-                                    members=members,
+                                    instance_members=members,
                                     special_operators=special_operators)
         # input(f"Resolving this of {new_type.name}")
         this.resolve(new_type)
-        outer_scope.members[decl.name.value] = StaticVariableDecl(TypeType.of(new_type),
+        outer_scope.members[decl.name.value] = StaticVariableDecl(StaticType.of(new_type),
                                                                   decl,
                                                                   member_decls={**this_decl.member_decls})

@@ -3,6 +3,7 @@ from io import BytesIO, IOBase, SEEK_CUR
 from logging import getLogger
 from typing import TYPE_CHECKING, ClassVar, Iterator, Self, TypeAlias
 from humanize.filesize import naturalsize
+from pathlib import Path
 
 from ....compiler import SourceLocation
 from . import BytecodeBase, BytecodeTypes
@@ -15,7 +16,7 @@ from .. import _encode_numeric, _encode_u32, int_u16, int_u32, int_u8, _decode_u
 
 _LOG = getLogger(__package__)
 
-SourceMap: TypeAlias = dict[SourceLocation, tuple[int_u32, int_u32]]
+SourceMap: TypeAlias = dict[tuple[int_u32, int_u32], SourceLocation]
 
 
 class BytecodeBinary(BytecodeBase):
@@ -104,7 +105,7 @@ class BytecodeBinary(BytecodeBase):
                 lines = (_decode_u16(stream.read(2)), _decode_u16(stream.read(2)))
                 columns = (_decode_u16(stream.read(2)), _decode_u16(stream.read(2)))
                 op_range = (_decode_u32(stream.read(4)), _decode_u32(stream.read(4)))
-                source_map[SourceLocation(seek, lines, columns, file_name)] = op_range
+                source_map[op_range] = SourceLocation(seek, lines, columns, file_name)
 
         return cls(bytecode, strings, types, funcs, entrypoint, source_map)
 
@@ -151,18 +152,18 @@ class BytecodeBinary(BytecodeBase):
             return
 
         _LOG.debug(f"Sourcemap count ({len(self.source_map):,})")
-        for i, (k, v) in enumerate(sorted(self.source_map.items(), key=lambda e: e[1][0])):
+        for i, (k, v) in enumerate(sorted(self.source_map.items(), key=lambda e: e[0][0])):
             with BytesIO() as buffer:
                 _LOG.debug(f"\tSource Map #{i}: {k}: {v}")
-                fname = k.file.encode('utf-8')
+                fname = v.file.encode('utf-8')
                 buffer.write(_encode_numeric(len(fname), int_u16))
                 buffer.write(fname)
-                buffer.write(_encode_numeric(k.seek[0], int_u32))
-                buffer.write(_encode_numeric(k.seek[1], int_u32))
-                buffer.write(_encode_numeric(k.lines[0], int_u16))
-                buffer.write(_encode_numeric(k.lines[1], int_u16))
-                buffer.write(_encode_numeric(k.columns[0], int_u16))
-                buffer.write(_encode_numeric(k.columns[1], int_u16))
-                buffer.write(_encode_u32(v[0]))
-                buffer.write(_encode_u32(v[1]))
+                buffer.write(_encode_numeric(v.seek[0], int_u32))
+                buffer.write(_encode_numeric(v.seek[1], int_u32))
+                buffer.write(_encode_numeric(v.lines[0], int_u16))
+                buffer.write(_encode_numeric(v.lines[1], int_u16))
+                buffer.write(_encode_numeric(v.columns[0], int_u16))
+                buffer.write(_encode_numeric(v.columns[1], int_u16))
+                buffer.write(_encode_u32(k[0]))
+                buffer.write(_encode_u32(k[1]))
                 yield buffer.getvalue()

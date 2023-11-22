@@ -1,21 +1,29 @@
+"""
+Integral types (numerics).
+"""
+
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import Any, Self
+from abc import ABC, abstractmethod
 
 from . import TypeBase
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class IntegralType(TypeBase):
+class IntegralType(ABC, TypeBase):  # type: ignore[misc]
     """Supertype for certain value types: integrals, floats, etc."""
 
-    reference_type: ClassVar[bool] = False  # type: ignore[misc]
-    inherits: tuple[Self] | None = field(init=False, default=())  # type: ignore[assignment]
-    indexable: ClassVar[None] = None  # type: ignore[misc]
-    callable: ClassVar[None] = None  # type: ignore[misc]
+    # Integral types are always builtin
     is_builtin: bool = field(init=False, default=True)
 
-    def could_hold_value(self, value: str) -> bool:
-        return False
+    @abstractmethod
+    def could_hold_value(self, value: Any) -> bool:
+        ...
+
+    @classmethod
+    @abstractmethod
+    def best_for_value(cls, value: Any) -> Self:
+        ...
 
 
 #
@@ -24,30 +32,27 @@ class IntegralType(TypeBase):
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class IntType(IntegralType):
+class IntType(IntegralType):  # type: ignore[misc]
     """Describes a type that is an integer number (ℤ)."""
     size: int
     signed: bool
 
     def range(self) -> tuple[int, int]:
-        max = (2**(self.size * 8)) - 1
-        min = 0
+        max_ = (2**(self.size * 8)) - 1
+        min_ = 0
         if self.signed:
-            max = max // 2
-            min = -(max + 1)
-        return min, max
+            max_ = max_ // 2
+            min_ = -(max_ + 1)
+        return min_, max_
 
-    def could_hold_value(self, value: str | int) -> bool:
-        try:
-            if isinstance(value, str):
-                value = int(value)
-            min, max = self.range()
-            return min <= value <= max
-        except:
-            return False
+    def could_hold_value(self, value: int) -> bool:
+        if not isinstance(value, int):
+            raise ValueError()
+        min_, max_ = self.range()
+        return min_ <= value and value <= max_
 
     @classmethod
-    def best_for_value(cls, value: int, want_signed: bool = False):
+    def best_for_value(cls, value: int, want_signed: bool = False) -> 'IntType':
         options = _SIGNED_TYPES if want_signed or value < 0 else _UNSIGNED_TYPES
         return min((x for x in options if x.could_hold_value(value)), key=lambda x: x.size)
 
@@ -73,22 +78,18 @@ _UNSIGNED_TYPES = (U8_TYPE, U16_TYPE, U32_TYPE, U64_TYPE)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class FloatType(IntegralType):
+class FloatType(IntegralType):  # type: ignore[misc]
     """Describes a IEEE floating point number."""
     size: int
     exp_bits: int
 
-    def could_hold_value(self, value: str | float) -> bool:
-        if isinstance(value, float):
-            return True
-        try:
-            float(value)
-            return True
-        except:
-            return False
+    def could_hold_value(self, value: float) -> bool:
+        if not isinstance(value, float):
+            raise ValueError()
+        return True
 
     @classmethod
-    def best_for_value(cls, value: float, want_signed: bool = False):
+    def best_for_value(cls, value: float) -> 'FloatType':
         return min((x for x in (F16_TYPE, F32_TYPE, F64_TYPE) if x.could_hold_value(value)), key=lambda x: x.size)
 
 
@@ -102,16 +103,17 @@ F64_TYPE = FloatType('f64', size=8, exp_bits=11)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class EnumType(IntType):
+class EnumType(IntType):  # type: ignore[misc]
     """Describes a type that is a set of scoped integral literals."""
     size: int = field(init=False)
     values: dict[str, int] = field(kw_only=False)
     inherits: tuple[IntType] = field(default=())  # type: ignore[assignment]
+
     is_builtin: bool = field(default=False)
 
     def __post_init__(self) -> None:
         TypeBase.__post_init__(self)
-        if self.inherits == ():
+        if not self.inherits:
             min_val = min(self.values.values())
             max_val = max(self.values.values())
             options = _UNSIGNED_TYPES if min_val < 0 else _SIGNED_TYPES
@@ -127,9 +129,5 @@ class EnumType(IntType):
             object.__setattr__(self, 'inherits', (selection, ))
         object.__setattr__(self, 'size', self.inherits[0].size)
 
-        for name in self.values:
-            self.members[name] = self
-
 
 BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U8_TYPE, ), signed=False, is_builtin=True)
-"""A special Enumeration type that inherits from u32 instead of u8 (as would be expected)."""

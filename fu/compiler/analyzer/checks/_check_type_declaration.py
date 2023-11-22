@@ -1,6 +1,6 @@
 from typing import Iterator
 
-from ....types import InterfaceType, ThisType, TypeBase, TypeType
+from ....types import InterfaceType, ThisType, TypeBase, StaticType
 from ... import CompilerNotice
 from ...lexer import (CompilerNotice, Declaration, Identity, ParamList, ReturnStatement, Scope, SpecialOperatorIdentity,
                       SpecialOperatorType, Type_, TypeDeclaration)
@@ -40,7 +40,7 @@ def check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice]
             case Declaration(identity=Identity()) if elem.initial is None and elem.identity.lhs.value == 'this':
                 # Special case - inheritance
                 inherits_decl = decl_of(elem.identity.rhs)
-                assert isinstance(inherits_decl.type, TypeType)
+                assert isinstance(inherits_decl.type, StaticType)
                 inherits_type = inherits_decl.type.underlying
                 if isinstance(inherits_type, InterfaceType):
                     # Type inherits an interface
@@ -123,7 +123,7 @@ def check_type_declaration(element: TypeDeclaration) -> Iterator[CompilerNotice]
         # input(f"constructor props are `{'`, `'.join(v.name for v in props.values())}`")
         # input(f"Constructor props: {params.params} -> {props.keys()}")
         this_type = this_decl.type
-        if isinstance(this_type, TypeType):
+        if isinstance(this_type, StaticType):
             this_type = this_type.underlying
         assert isinstance(this_type, TypeBase), f"`this` was unexpectedtly a `{type(this_type).__name__}`."
         props['this'] = StaticVariableDecl(this_type, element, member_decls=this_decl.member_decls)

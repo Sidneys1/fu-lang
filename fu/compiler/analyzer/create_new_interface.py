@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Iterator
 
-from ...types import GenericType, InterfaceType, ThisType, TypeBase, TypeType, IntegralType
+from ...types import GenericType, InterfaceType, ThisType, TypeBase, StaticType, IntegralType
 from .. import CompilerNotice
 from ..lexer import *
 from .resolvers import resolve_type
@@ -174,12 +174,12 @@ def create_new_interface(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> I
                                  size=None,
                                  reference_type=True,
                                  inherits=inherits,
-                                 members=members,
+                                 instance_members=members,
                                  special_operators=special_operators,
                                  generic_params=generic_params,
                                  indexable=indexable,
                                  default_impls=default_impl_members)
         this.resolve(new_type)
-        outer_scope.members[decl.name.value] = StaticVariableDecl(TypeType.of(new_type),
+        outer_scope.members[decl.name.value] = StaticVariableDecl(StaticType.of(new_type),
                                                                   decl,
                                                                   member_decls={**this_decl.member_decls})

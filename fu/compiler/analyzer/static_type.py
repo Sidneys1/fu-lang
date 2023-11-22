@@ -1,11 +1,10 @@
 from logging import getLogger
 
-from ...types import TypeBase, TypeType
-from ...types.composed_types.generic_types import GenericType
-from ...types.composed_types.generic_types.array import ARRAY_TYPE
+from ...types import TypeBase, StaticType, ComposedType, GenericType, ARRAY_TYPE
+
 from .. import CompilerNotice
 from ..lexer import ArrayDef, GenericParamList, Identity, ParamList, Type_
-# from . import _LOG, _populate
+
 from .scope import AnalyzerScope
 from .static_variable_decl import StaticVariableDecl
 
@@ -23,7 +22,7 @@ def type_from_lex(type_: Type_, scope: AnalyzerScope) -> TypeBase:
     assert not isinstance(existing, AnalyzerScope)
     assert isinstance(existing.type, TypeBase)
     actual_type = existing.type
-    if isinstance(actual_type, TypeType):
+    if isinstance(actual_type, StaticType):
         actual_type = actual_type.underlying
     if type_.mods:
         return _with_modifiers(actual_type, list(type_.mods), scope)
@@ -39,13 +38,13 @@ def _with_modifiers(t: TypeBase, mods: list[ParamList | ArrayDef | GenericParamL
         mod = mods.pop(0)
         match mod:
             case ArrayDef():
-                ret = ARRAY_TYPE.resolve_generic_instance({'T': ret})
+                ret = ARRAY_TYPE.resolve_generic({'T': ret})
             case ParamList():
                 params = tuple(
                     type_from_lex(x.rhs if isinstance(x, Identity) else x, scope) for x in mod.params
                     if isinstance(x, Type_) or x.rhs != 'namespace')
                 add = '(' + ', '.join(x.name for x in params) + ')'
-                ret = TypeBase(ret.name + add, size=None, callable=(params, t))
+                ret = ComposedType(ret.name + add, None, callable=(params, t))
             case GenericParamList():
                 # assert isinstance(ret, )
                 assert isinstance(ret, GenericType), f"Expected Generic Type, got {type(ret).__name__} `{ret.name}`"
@@ -63,7 +62,7 @@ def _with_modifiers(t: TypeBase, mods: list[ParamList | ArrayDef | GenericParamL
                         x_type = GenericType.GenericParam(x.value)
                     param_types[k] = x_type
                 _LOG.debug(f"Replacing args in {t.name}: {','.join(f'{k}: {v.name}' for k,v in param_types.items())}")
-                new_type = ret.resolve_generic_instance(param_types)
+                new_type = ret.resolve_generic(param_types)
                 # assert not isinstance(new_type, GenericType) or all(not isinstance(x, GenericType)
                 #                                                     for x in new_type.generic_params.values())
                 _LOG.debug(f"got {new_type.name}")

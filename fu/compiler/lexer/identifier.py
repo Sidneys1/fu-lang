@@ -22,4 +22,5 @@ class Identifier(Lex):
     def _try_lex(cls, stream: TokenStream) -> Lex | None:
         if (tok := stream.pop()) is None or tok.type != TokenType.Word:
             return None
+        # print(f'\t\tIdentifier `{tok.value}`! {tok.location}')
         return Identifier([tok], tok.value, location=tok.location)

@@ -25,7 +25,7 @@ def _expand_inherits(type_: TypeBase) -> Iterator[TypeBase]:
         type_ = to_expand.pop()
         if isinstance(type_, ThisType):
             type_ = type_.resolved
-        if isinstance(type_, TypeType):
+        if isinstance(type_, StaticType):
             raise NotImplementedError(type_.name)
         if type_ in already_expanded:
             continue
@@ -195,7 +195,8 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             if isinstance(lhs_type, StaticVariableDecl):
                 lhs_decl = lhs_type
                 lhs_type = lhs_type.type
-            if element.rhs.value not in lhs_type.members:
+            # TODO: check if this is a Type (instance) or a TypeType (static).
+            if element.rhs.value not in lhs_type.instance_members:
                 # input(f"\n\n\n{lhs_type.name}.{element.rhs.value} not in {lhs_decl.member_decls}")
                 yield CompilerNotice('Error',
                                      f"`{lhs_type.name}` does not have a `{element.rhs.value}` member.",
@@ -277,7 +278,7 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                 #     yield CompilerNotice('Error', f'Parameter mismatch. Got {rhs_params}', element.rhs.location)
                 return
 
-            if decl_lhs is not None and isinstance(type_of_lhs, TypeType):
+            if decl_lhs is not None and isinstance(type_of_lhs, StaticType):
                 underlying = type_of_lhs.underlying
                 print(f"`{element.lhs}` is a type! We're constructing a `{underlying.name}`!")
                 assert type_of_lhs.callable[1] == underlying
@@ -397,7 +398,9 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                     resovled_decl = resolved
                     resolved = resolved.type
                 if resolved != BOOL_TYPE:
-                    yield CompilerNotice('Error', f"`if` term does not evaluate to a `bool` (got `{resolved.name}` instead).", element.term.location)
+                    yield CompilerNotice('Error',
+                                         f"`if` term does not evaluate to a `bool` (got `{resolved.name}` instead).",
+                                         element.term.location)
             for x in element.content:
                 _check(element.content)
 

@@ -1,6 +1,6 @@
 from typing import Generator, Iterator, Any
 
-from ....types import BOOL_TYPE, VOID_TYPE, EnumType, FloatType, GenericType, InterfaceType, IntType, TypeBase, ThisType, TypeType
+from ....types import BOOL_TYPE, VOID_TYPE, EnumType, FloatType, GenericType, InterfaceType, IntType, TypeBase, ThisType, StaticType
 from ... import CompilerNotice
 from ...util import collect_returning_generator
 from ...lexer import CompilerNotice, SourceLocation
@@ -14,7 +14,7 @@ def _expand_generic_inherits(type_: GenericType) -> Iterator[GenericType]:
     # print(f"Expanding inheritance of {type_.name}:")
     while to_expand:
         type_ = to_expand.pop()
-        if isinstance(type_, ThisType) or isinstance(type_, TypeType):
+        if isinstance(type_, ThisType) or isinstance(type_, StaticType):
             raise NotImplementedError(type_.name)
         # if type_ in already_expanded:
         #     continue

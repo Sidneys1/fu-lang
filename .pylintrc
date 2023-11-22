@@ -288,7 +288,7 @@ ignored-parents=
 max-args=5
 
 # Maximum number of attributes for a class (see R0902).
-max-attributes=7
+max-attributes=15
 
 # Maximum number of boolean expressions in an if statement (see R0916).
 max-bool-expr=5
@@ -436,6 +436,13 @@ disable=raw-checker-failed,
         wrong-import-position,
         import-outside-toplevel,
         useless-return,
+        too-many-variables,
+        too-many-statements,
+        pointless-string-statement,
+        use-dict-literal,
+        too-many-locals,
+        too-many-return-statements,
+        too-many-branches,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

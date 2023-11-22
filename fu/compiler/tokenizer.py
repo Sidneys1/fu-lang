@@ -208,22 +208,24 @@ class Token:
                     npos = start_pos
                     while char in TokenType.Word.value:
                         buffer += char
-                        end_pos = last_pos
                         last_pos = stream.position
+                        end_pos = last_pos
                         npos = stream.position
                         char = stream.pop()
+
                     if buffer == 'op' and char in SPECIAL_OPERATORS:
                         t = SPECIAL_OPERATORS[char]
                         while len(buffer) < len(t.value) and char == t.value[len(buffer)]:
                             buffer += char
-                            end_pos = last_pos
                             last_pos = stream.position
+                            end_pos = last_pos
                             npos = stream.position
                             char = stream.pop()
                         if buffer != t.value:
                             raise ValueError(f"I don't undertsand the token {buffer!r} (expected {t.value}).")
                         yield Token(buffer, TokenType.SpecialOperator, _pos(start_pos, end_pos), special_op_type=t)
                         continue
+
                     yield Token(buffer, TOKEN_REVERSE_MAP.get(buffer, TokenType.Word), _pos(start_pos, end_pos))
                     start_pos = npos
                     continue

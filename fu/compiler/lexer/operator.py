@@ -149,8 +149,8 @@ class Operator(Lex):
     @classmethod
     def _try_lex(cls, stream: TokenStream, min_bp=0) -> Lex | None:
         from .atom import Atom
-        lhs: Atom | Operator | None
         raw: list[Lex | Token] = []
+        initial: Atom | Operator | None
         if not stream.eof and stream.peek().type in (TokenType.Operator, TokenType.Dot):
             # Prefix operator
             oper = stream.pop()
@@ -159,77 +159,103 @@ class Operator(Lex):
             _LOG.debug("%sPrefix is %s", '| ' * stream.depth, oper.value)
             _, r_bp = PREFIX_BINDING_POWER[oper.value]
             # TODO
-            if (lhs := cast(Atom | Operator | None, Operator.try_lex(stream, r_bp))) is None:
+            if (initial := cast(Atom | Operator | None, Operator.try_lex(stream, r_bp))) is None:
                 return None
             from .lexed_literal import LexedLiteral
-            if isinstance(lhs, LexedLiteral
-                          ) and lhs.type == TokenType.Number and oper.type == TokenType.Operator and oper.value == '-':
-                lhs = replace(lhs, value='-' + lhs.value, location=SourceLocation.from_to(oper.location, lhs.location))
+            if isinstance(
+                    initial, LexedLiteral
+            ) and initial.type == TokenType.Number and oper.type == TokenType.Operator and oper.value == '-':
+                initial = replace(initial,
+                                  value='-' + initial.value,
+                                  location=SourceLocation.from_to(oper.location, initial.location))
             else:
-                lhs = Operator(raw, None, lhs, oper, location=SourceLocation.from_to(oper.location, lhs.location))
-            raw = [lhs]
-        elif (lhs := Atom.try_lex(stream)) is None:
+                initial = Operator(raw,
+                                   None,
+                                   initial,
+                                   oper,
+                                   location=SourceLocation.from_to(oper.location, initial.location))
+        elif (initial := Atom.try_lex(stream)) is None:
             _LOG.warn("%sLeft-hand side was not an Atom", 'x ' * stream.depth)
             return None
-        _LOG.debug(f"Lhs is {lhs}")
+
+        raw = [initial]
+        # print('while True:')
+        # print(f"\tLhs is {initial}")
         while True:
+            # print('\tloop start')
             oper = stream.peek()
             if oper is None:
-                # print("no oper")
+                # print("\tno oper; break")
                 break
             _LOG.debug("Oper is %r", oper)
             if not any(oper.type == o for o in cls.OPERATORS):
+                # print(f'\t{oper.type} is not an oper; break')
                 break
             postfix = POSTFIX_BINDING_POWER.get(oper.value)
             if postfix is not None:
+                # print('\tis postfix')
                 l_bp, _ = postfix
                 if l_bp < min_bp:
-                    # print("oper not strong enough")
+                    # print("\t\toper not strong enough; break")
                     break
                 raw.append(stream.pop())
                 match oper.type:
                     case TokenType.LParen:
+                        # print('\tlparen')
                         from . import ExpList
                         rhs = None
                         if (tok := stream.peek()) is not None and tok.type != TokenType.RParen:
-                            rhs = ExpList.try_lex(stream)
-                        raw.append(rhs)
+                            rhs = ExpList.expect(stream)
+                        raw.append(rhs)  # type: ignore
                         raw.append(stream.expect(TokenType.RParen))
-                        lhs = Operator(raw,
-                                       lhs,
-                                       rhs,
-                                       oper,
-                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
-                        raw = [lhs]
+                        initial = Operator(raw,
+                                           initial,
+                                           rhs,
+                                           oper,
+                                           location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [initial]
                     case TokenType.LBracket:
+                        # print('\tlbracket')
                         rhs = None
                         if (tok := stream.peek()) is not None and tok.type != TokenType.RBracket:
-                            rhs = Operator.try_lex(stream, 0)
-                        raw.append(rhs)
+                            rhs = Operator.try_lex(stream, 0)  # type: ignore
+                        raw.append(rhs)  # type: ignore
                         raw.append(stream.expect(TokenType.RBracket))
-                        lhs = Operator(raw,
-                                       lhs,
-                                       rhs,
-                                       oper,
-                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
-                        raw = [lhs]
+                        initial = Operator(raw,
+                                           initial,
+                                           rhs,
+                                           oper,
+                                           location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [initial]
                     case _:
-                        lhs = Operator(raw,
-                                       lhs,
-                                       None,
-                                       oper,
-                                       location=SourceLocation.from_to(raw[0].location, raw[-1].location))
-                        raw = [lhs]
+                        # print(f"\tinfix `{oper.value}`: {SourceLocation.from_to(raw[0].location, raw[-1].location)}")
+                        initial = Operator(raw,
+                                           initial,
+                                           None,
+                                           oper,
+                                           location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+                        raw = [initial]
                 continue
+
             l_bp, r_bp = INFIX_BINDING_POWER[oper.value]
             if l_bp < min_bp:
-                # print("oper not strong enough")
+                # print("\toper not strong enough; break")
                 break
+            # print('\tadding oper')
             raw.append(stream.pop())
-            if (rhs := Operator.try_lex(stream, r_bp)) is None:
-                # print("rhs none")
+            if (rhs := Operator.try_lex(stream, r_bp)) is None:  # type: ignore
+                # print("\trhs none; break")
                 break
+            # print(f'\trhs is {type(rhs).__name__}@  {rhs.location}')
             raw.append(rhs)
-            lhs = Operator(raw, lhs, rhs, oper, location=SourceLocation.from_to(raw[0].location, raw[-1].location))
-            raw = [lhs]
-        return lhs
+            # input(
+            #     f'oper done: {initial}{oper.value}{rhs} - {raw} - {SourceLocation.from_to(raw[0].location, raw[-1].location)}'
+            # )
+            initial = Operator(raw,
+                               initial,
+                               rhs,
+                               oper,
+                               location=SourceLocation.from_to(raw[0].location, raw[-1].location))
+            raw = [initial]
+
+        return initial

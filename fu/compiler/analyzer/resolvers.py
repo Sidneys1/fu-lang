@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def resolve_type(element: Lex,
                  want: TypeBase | None = None,
                  want_signed: bool = False,
-                 warn: Callable[[CompilerNotice], None] | None = None) -> StaticVariableDecl | TypeBase | StaticScope:
+                 warn: Callable[[CompilerNotice], None] | None = None) -> StaticVariableDecl | TypeBase | AnalyzerScope:
     from .static_type import type_from_lex
     if warn is None:
 
@@ -197,7 +197,8 @@ def resolve_type(element: Lex,
                     if 'i' in element.value:
                         raise NotImplementedError()
                     # Bare Integer
-                    if want is not None and isinstance(want, IntegralType) and want.could_hold_value(element.value):
+                    if want is not None and isinstance(want, IntegralType) and want.could_hold_value(int(
+                            element.value)):
                         return want.as_const()
                     return SIZE_TYPE.as_const() if want_signed or element.value[0] == '-' else USIZE_TYPE.as_const()
                 case _:

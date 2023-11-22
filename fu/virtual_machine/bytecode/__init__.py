@@ -28,16 +28,20 @@ int_i16 = NewType('int_i16', int)
 int_i32 = NewType('int_i32', int)
 int_i64 = NewType('int_i64', int)
 
-T = TypeVar('T', int_u8, int_u16, int_u32, int_u64, int_i8, int_i16, int_i32, int_i64)
+float_f16 = NewType('float_f16', float)
+float_f32 = NewType('float_f32', float)
+float_f64 = NewType('float_f64', float)
+
+T = TypeVar('T', int_u8, int_u16, int_u32, int_u64, int_i8, int_i16, int_i32, int_i64, float_f16, float_f32, float_f64)
 
 
-def _to_bytecode_numeric(i: int, to: type[T]) -> T:
+def _to_bytecode_numeric(i: int | float, to: type[T]) -> T:
     if to is int_u8 and 0 > i > 255:
         raise ValueError()
     return to(i)
 
 
-def _encode_numeric(i: int, to: type[T]) -> bytes:
+def _encode_numeric(i: int | float, to: type[T]) -> bytes:
     if to is not None:
         i = _to_bytecode_numeric(i, to)
     return _get_numeric_coders(to)[0](i)
@@ -65,10 +69,6 @@ _encode_i16: Callable[[int_i16], bytes] = partial(_encode_struct, '>h')
 _encode_i32: Callable[[int_i32], bytes] = partial(_encode_struct, '>i')
 _encode_i64: Callable[[int_i64], bytes] = partial(_encode_struct, '>q')
 
-float_f16 = NewType('float_f16', float)
-float_f32 = NewType('float_f32', float)
-float_f64 = NewType('float_f64', float)
-
 _decode_f16: Callable[[bytes], float_f16] = partial(_decode_struct, '>e')
 _decode_f32: Callable[[bytes], float_f32] = partial(_decode_struct, '>f')
 _decode_f64: Callable[[bytes], float_f64] = partial(_decode_struct, '>d')
@@ -88,6 +88,7 @@ _NUMERIC_CODERS = {
     int_i16: (_encode_i16, _decode_i16),
     int_i32: (_encode_i32, _decode_i32),
     int_i64: (_encode_i64, _decode_i64),
+    #
     float_f16: (_encode_f16, _decode_f16),
     float_f32: (_encode_f32, _decode_f32),
     float_f64: (_encode_f64, _decode_f64),

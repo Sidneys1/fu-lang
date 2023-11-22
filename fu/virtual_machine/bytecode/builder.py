@@ -1,14 +1,20 @@
 from io import SEEK_END, BytesIO
-from typing import TYPE_CHECKING, Mapping
+from typing import Mapping
 from types import EllipsisType
+from contextvars import ContextVar
+from contextlib import contextmanager
 
 from ...compiler import SourceLocation
 from ...types import VOID_TYPE, TypeBase
+
 from . import _encode_numeric, _encode_u32, _to_bytecode_numeric, int_u16, int_u32
 from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
+_BUILDER: ContextVar['BytecodeBuilder'] = ContextVar('_BUILDER')
+
 
 class BytecodeBuilder:
+    """Used for building a bytecode binary."""
     __code_length: int
 
     __types: list[BytecodeType]
@@ -16,7 +22,7 @@ class BytecodeBuilder:
     __strings_buffer: BytesIO
     __functions: list[BytecodeFunction | EllipsisType]
     __code: list[bytes]
-    __source_map: dict[SourceLocation, tuple[int_u32, int_u32]]
+    __source_map: dict[tuple[int_u32, int_u32], SourceLocation]
     __function_map: dict[int_u32, int_u16]
 
     @property
@@ -25,6 +31,9 @@ class BytecodeBuilder:
         return self.__function_map
 
     def __init__(self) -> None:
+        current = _BUILDER.get(None)
+        assert current is None
+
         self.__code_length = 0
 
         self.__types = []
@@ -36,6 +45,19 @@ class BytecodeBuilder:
         self.__function_map = {}
         self.__code = []
         self.__source_map = {}
+
+    @staticmethod
+    def current() -> 'BytecodeBuilder':
+        ret = _BUILDER.get(None)
+        assert ret is not None
+        return ret
+
+    @contextmanager
+    @staticmethod
+    def create():
+        from ...compiler.util import set_contextvar
+        with set_contextvar(_BUILDER, BytecodeBuilder()) as builder:
+            yield builder
 
     def finalize(self, entrypoint: int_u32 | None) -> BytecodeBinary:
         assert all(isinstance(x, BytecodeFunction) for x in self.__functions)
@@ -97,7 +119,7 @@ class BytecodeBuilder:
         return _to_bytecode_numeric(pos, int_u32)
 
     def add_source_map(self, location: SourceLocation, byte_range: tuple[int, int]):
-        self.__source_map[location] = (int_u32(byte_range[0]), int_u32(byte_range[1]))
+        self.__source_map[(int_u32(byte_range[0]), int_u32(byte_range[1]))] = location
 
     # @property
     # def code_length(self) -> int:

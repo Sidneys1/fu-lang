@@ -14,7 +14,7 @@ def _check_satisfies_interface(subject: TypeBase, interface: InterfaceType,
     # check duck-typed?
     errs: list[CompilerNotice] = []
 
-    for interface_member_name, interface_member_type in interface.members.items():
+    for interface_member_name, interface_member_type in interface.instance_members.items():
         checked = []
         haystack = [subject]
         subject_member_type = None

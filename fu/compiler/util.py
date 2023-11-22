@@ -36,6 +36,7 @@ def collect_returning_generator(generator: Generator[T, None, R]) -> tuple[R, li
     ret2 = list(_())
     return ret, ret2
 
+
 def set_default_subparser(self, name, args=None, positional_args=0):
     """default subparser selection. Call after setup, just before parse_args()
     name: is the name of the subparser to call by default
@@ -63,5 +64,6 @@ def set_default_subparser(self, name, args=None, positional_args=0):
                 sys.argv.insert(len(sys.argv) - positional_args, name)
             else:
                 args.insert(len(args) - positional_args, name)
+
 
 argparse.ArgumentParser.set_default_subparser = set_default_subparser

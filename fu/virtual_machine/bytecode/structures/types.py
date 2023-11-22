@@ -32,8 +32,8 @@ class BytecodeType(BytecodeBase):
     def from_type(cls, builder: 'BytecodeBuilder', underlying: TypeBase) -> 'BytecodeType':
         name = builder.add_string(underlying.name)
         callable_: None | tuple[tuple[int_u16, ...], int_u16] = None
-        if underlying.callable is not None:
-            args, ret = underlying.callable
+        if (underlying_callable := getattr(underlying, 'callable', None)) is not None:
+            args, ret = underlying_callable
             ret_index = builder.add_type_type(ret)
             args_indexes = tuple(builder.add_type_type(t) for t in args)
             callable_ = args_indexes, ret_index

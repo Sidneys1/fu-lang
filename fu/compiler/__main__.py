@@ -17,7 +17,6 @@ _LOG = getLogger(__package__)
 
 class CompilerParsedArgs(Protocol):
     run: bool
-    verbose: bool
     check_only: bool
     format: bool
     input: Path
@@ -58,7 +57,7 @@ class CompilerParser(Protocol):
         ...
 
 def make_compiler_parser() -> CompilerParser:
-    parser = ArgumentParser(NAME, description='Parse, check, and compile a Fu program.')
+    parser = ArgumentParser(NAME, description='Parse, check, and compile a Fu program.', add_help=False)
 
     group = parser.add_mutually_exclusive_group()
 
@@ -74,9 +73,6 @@ def make_compiler_parser() -> CompilerParser:
                         help="Path to the standard library (default: `%(default)s`).",
                         default=DEFAULT_STD_ROOT)
 
-    output_options = parser.add_argument_group('Output Options')
-    output_options.add_argument('-v', '--verbose', action='store_true')
-
     parser.add_argument(
         'input',
         metavar='PATH',
@@ -87,7 +83,15 @@ def make_compiler_parser() -> CompilerParser:
 
     return parser  # type: ignore
 
-def main(ns: CompilerParsedArgs) -> int:
+from ..__main__ import CommonParsedArgs, make_common_args
+
+class _SharedParser(Protocol):
+    class _SharedArgs(CommonParsedArgs, CompilerParsedArgs, Protocol):
+        ...
+    def parse_args(self) -> _SharedArgs:
+        ...
+
+def main(ns: _SharedParser._SharedArgs) -> int:
     global_scope = AnalyzerScope.new_global_scope()
     binary: BytecodeBinary | None = None
     with set_global_scope(global_scope):
@@ -112,11 +116,11 @@ def main(ns: CompilerParsedArgs) -> int:
         errors = list(check_program(docs))
 
         if not ns.check_only and all(error.level.lower() not in ('error', 'critical') for error in errors):
-            from .compile import compile
+            from .compile import compile_binary
             from .util import collect_returning_generator
 
 
-            binary, c_errors = collect_returning_generator(compile())
+            binary, c_errors = collect_returning_generator(compile_binary())
             errors.extend(c_errors)
 
     files = set(error.location.file if error.location is not None else None for error in errors)
@@ -161,9 +165,11 @@ def main(ns: CompilerParsedArgs) -> int:
 
     return 0
 
+def _make_shared_args() -> _SharedParser:
+    return ArgumentParser(parents=(make_common_args(), make_compiler_parser()))  # type: ignore
 
 def _main() -> int:
-    return main(make_compiler_parser().parse_args())
+    return main(_make_shared_args().parse_args())
 
 if __name__ == '__main__':
     sys.exit(_main())
