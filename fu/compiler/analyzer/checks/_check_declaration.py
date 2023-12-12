@@ -1,10 +1,10 @@
 from typing import Iterator
 from logging import getLogger
 
-from ....types import ThisType
+from ....types import ThisType, ComposedType
 from ... import CompilerNotice
-from ...lexer import (CompilerNotice, Declaration, Identity, ParamList, Scope, Type_, Expression, Operator, Atom,
-                      LexedLiteral, Identifier)
+from ...lexer import (Declaration, Identity, ParamList, Scope, Type_, Expression, Operator, Atom, LexedLiteral,
+                      Identifier)
 from .. import _mark_checked_recursive
 from .._populate import _populate
 from ..scope import AnalyzerScope
@@ -58,7 +58,7 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
                       (Scope, Expression, Operator, Atom, LexedLiteral,
                        Identifier)), f"element.initial is unexpectedly a `{type(element.initial).__name__}`"
 
-    if lhs_type.callable is None:
+    if not isinstance(lhs_type, ComposedType) or lhs_type.callable is None:
         raise CompilerNotice("Error", f"`{element.identity}` is not callable but is initialized with a body.",
                              element.identity.location)
 
@@ -69,7 +69,7 @@ def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
     assert isinstance(params, ParamList)
     assert all(not isinstance(p, Type_) or p.ident.value == 'this' for p in params.params)
     props = {
-        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()).as_const(), p)
+        p.lhs.value: StaticVariableDecl(type_from_lex(p.rhs, AnalyzerScope.current()), p, const=True)
         for p in params.params if isinstance(p, Identity)
     }
     # if element.is_fat_arrow:

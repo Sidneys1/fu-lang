@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable
 
-from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, BOOL_TYPE, FloatType, IntType, TypeBase
+from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, BOOL_TYPE, FloatType, IntType, TypeBase, ThisType
 from ...types.integral_types import IntegralType
 from .. import CompilerNotice
 from ..lexer import ExpList, Identifier, Lex, Operator, ReturnStatement, StaticScope, Token, TokenType, Type_
@@ -56,15 +56,22 @@ def resolve_type(element: Lex,
             return ret
         case Operator(oper=Token(type=TokenType.Dot)):
             lhs_type = resolve_type(element.lhs)
+            if isinstance(lhs_type, AnalyzerScope):
+                ret = lhs_type.members.get(element.rhs.value, None)
+                if ret is None:
+                    raise CompilerNotice('Error',
+                                         f"Scope `{lhs_type.name}` has no member `{element.rhs.value}`.",
+                                         location=element.location)
+                return ret
             lhs_decl = None
             if isinstance(lhs_type, StaticVariableDecl):
                 lhs_decl = lhs_type
                 lhs_type = lhs_type.type
             assert isinstance(element.rhs, Identifier)
-            ret = lhs_type.members.get(element.rhs.value, None)
+            ret = lhs_type.instance_members.get(element.rhs.value, None)
             if ret is None:
                 raise CompilerNotice('Error',
-                                     f"{lhs_type.name} has no member {element.rhs.value}.",
+                                     f"Type `{lhs_type.name}` has no member `{element.rhs.value}`.",
                                      location=element.location)
             return ret
         case Operator(oper=Token(type=TokenType.LBracket)):
@@ -140,13 +147,13 @@ def resolve_type(element: Lex,
                         '*': 'multiplication',
                         '/': 'division'
                     }.get(element.oper.value, element.oper.value)
-                    if lhs_type.size != rhs_type.size:
+                    if lhs_type.get_size() != rhs_type.get_size():
                         warn(
                             CompilerNotice(
                                 'Warning',
                                 f"Performing `{oper_name}` between floating point types of different size can result in inforation loss.",
                                 element.location))
-                    return max((x for x in (lhs_type, rhs_type)), key=lambda x: x.size or 0)
+                    return max((x for x in (lhs_type, rhs_type)), key=lambda x: x.get_size() or 0)
                 case IntType(), IntType():
                     assert isinstance(lhs_type, IntType) and isinstance(rhs_type, IntType)
                     oper_name = {
@@ -155,13 +162,13 @@ def resolve_type(element: Lex,
                         '*': 'multiplication',
                         '/': 'division'
                     }.get(element.oper.value, element.oper.value)
-                    if lhs_type.signed != rhs_type.signed or lhs_type.size != rhs_type.size:
+                    if lhs_type.signed != rhs_type.signed or lhs_type.get_size() != rhs_type.get_size():
                         warn(
                             CompilerNotice(
                                 'Warning',
                                 f"Performing `{oper_name}` between numeric types of different signedness or size can result in inforation loss.",
                                 element.location))
-                    return max((x for x in (lhs_type, rhs_type)), key=lambda x: x.size or 0)
+                    return max((x for x in (lhs_type, rhs_type)), key=lambda x: x.get_size() or 0)
                 case _, _:
                     raise NotImplementedError()
             raise NotImplementedError()
@@ -190,8 +197,8 @@ def resolve_type(element: Lex,
                     if element.value.endswith('f'):
                         val = float(element.value[:-1])
                         if want is not None and isinstance(want, IntegralType) and want.could_hold_value(int(val)):
-                            return want.as_const()
-                        return F32_TYPE.as_const()
+                            return want
+                        return F32_TYPE
                     if 'f' in element.value or '.' in element.value:
                         raise NotImplementedError()
                     if 'i' in element.value:
@@ -199,8 +206,8 @@ def resolve_type(element: Lex,
                     # Bare Integer
                     if want is not None and isinstance(want, IntegralType) and want.could_hold_value(int(
                             element.value)):
-                        return want.as_const()
-                    return SIZE_TYPE.as_const() if want_signed or element.value[0] == '-' else USIZE_TYPE.as_const()
+                        return want
+                    return SIZE_TYPE if want_signed or element.value[0] == '-' else USIZE_TYPE
                 case _:
                     raise NotImplementedError()
         case Type_():
@@ -217,12 +224,17 @@ def resolve_owning_type(element: Lex) -> tuple[StaticVariableDecl, StaticVariabl
         case Operator(oper=Token(type=TokenType.Dot), rhs=Identifier()):
             _LOG.debug(f"Trying to find `{element.rhs}` in `{element.lhs}`.")
             lhs_decl = scope.in_scope('this') if element.lhs is None else resolve_type(element.lhs)
+            lhs_type = lhs_decl.type
+            if element.lhs is None:
+                assert isinstance(lhs_type, ThisType)
+                lhs_type = lhs_type.resolved
+
             assert lhs_decl is not None and isinstance(lhs_decl, StaticVariableDecl)
             # print(f"\n\n{scope.members.keys()}\n")
             # input(f"lhs_type is {lhs_decl.type.name}: {lhs_decl.member_decls}")
 
             member_name = element.rhs.value
-            if member_name not in lhs_decl.type.members and member_name not in lhs_decl.member_decls:
+            if member_name not in lhs_type.instance_members and member_name not in lhs_type.static_members:
                 raise CompilerNotice('Error', f"`{lhs_decl.type.name}` does not have a {member_name!r} member.",
                                      element.rhs.location)
 

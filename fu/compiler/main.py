@@ -7,11 +7,13 @@ from typing import Protocol
 from ..virtual_machine.bytecode.structures.binary import BytecodeBinary
 
 from . import NAME
+from .target import Target, TARGET
 from .analyzer import check_program
 from .analyzer.scope import AnalyzerScope, set_global_scope
 from .console import render_error
 from .discovery import DEFAULT_STD_ROOT, discover_files, load_std, parse_file
 from .lexer import Document
+from .util import ScopedContextVar
 
 _LOG = getLogger(__package__)
 
@@ -23,6 +25,8 @@ class CompilerParsedArgs(Protocol):
     std: Path
     output: Path
     args: list[str]
+    target: Target
+    list_targets: bool
 
     @staticmethod
     def parse_input_path(string: str) -> Path:
@@ -57,7 +61,7 @@ class CompilerParser(Protocol):
         ...
 
 def make_compiler_parser() -> CompilerParser:
-    parser = ArgumentParser(NAME, description='Parse, check, and compile a Fu program.', add_help=False)
+    parser = ArgumentParser(NAME, description='Parse, check, and compile a Fu program.')
 
     group = parser.add_mutually_exclusive_group()
 
@@ -72,6 +76,10 @@ def make_compiler_parser() -> CompilerParser:
                         type=CompilerParsedArgs.parse_std_path,
                         help="Path to the standard library (default: `%(default)s`).",
                         default=DEFAULT_STD_ROOT)
+
+    target_options = build_options.add_argument_group("Target Options")
+    target_options.add_argument('-t', '--target', help="Target platform, in form `arch-platform` (default: `%(default)s`).", type=Target.from_string, default=Target.determine())
+    target_options.add_argument('--list-targets', action='store_true', help='List all supported target platforms.')
 
     parser.add_argument(
         'input',
@@ -92,6 +100,19 @@ class _SharedParser(Protocol):
         ...
 
 def main(ns: _SharedParser._SharedArgs) -> int:
+    if ns.list_targets:
+        from .target import Architecture, Platform
+        print('Supported compilation targets (arch-platform):')
+        print('Architectures:')
+        for value in Architecture:
+            print(f' * {value.value}')
+        print('Platforms:')
+        for value in Platform:
+            print(f' * {value.value}')
+        return 0
+
+    target = ScopedContextVar(TARGET, ns.target)
+
     global_scope = AnalyzerScope.new_global_scope()
     binary: BytecodeBinary | None = None
     with set_global_scope(global_scope):

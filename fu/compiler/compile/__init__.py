@@ -149,6 +149,7 @@ def compile_blocks(statements: Iterable[Statement | Declaration | ReturnStatemen
         write_to_buffer(buffer, OpcodeEnum.NOP)
         yield from compile_statement(statement, buffer)
         write_to_buffer(buffer, OpcodeEnum.NOP)
+        _LOG.debug("Yielding source map for block")
         yield TempSourceMap(start, buffer.tell() - start, statement.location)
 
 
@@ -183,13 +184,16 @@ def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction
         with FunctionScope(element.identity.lhs.value, func_id, func.type.callable[1], args=args,
                            decls=decls) as scope, BytesIO() as buffer:
             # TODO split in to branch-delimited blocks of code
+
+            start = buffer.tell()
             return_storage, source_maps = collect_returning_generator(
                 compile_expression(element.initial, buffer, func.type.callable[1]))
-            start = buffer.tell()
             convert_to_stack(return_storage, func.type.callable[1], buffer, element.initial.location)
             next_part_start = buffer.tell()
+
             if next_part_start != start:
                 source_locs.append(TempSourceMap(start, next_part_start - start, element.raw[1].location))
+
             if buffer.tell() >= 3 and buffer.seek(
                     -3, SEEK_CUR) and (last := buffer.read(3)) and last[0] == OpcodeEnum.CALL_EXPORT.value:
                 buffer.seek(-3, SEEK_CUR)
@@ -197,6 +201,7 @@ def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction
             else:
                 write_to_buffer(buffer, OpcodeEnum.RET)
             source_locs.extend(source_maps)
+            _LOG.debug("Adding fat arrow source map")
             source_locs.append(TempSourceMap(start, buffer.tell() - start, element.initial.location))
             code = buffer.getvalue()
     else:
@@ -234,7 +239,7 @@ def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction
     address = builder.add_code(code)
 
     for loc in source_locs:
-        print(f"Adding source map {loc.offset+address:#06x}[{loc.length}] - {loc.location}")
+        # print(f"Adding source map {loc.offset+address:#06x}[{loc.length}] - {loc.location}")
         builder.add_source_map(loc.location, (loc.offset + address, loc.length))
 
     builder.add_source_map(func.lex.location, (address, len(code)))

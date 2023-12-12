@@ -38,18 +38,19 @@ BUILTIN_NAMES = {
 class TypeBase:  # type: ignore[misc]
     """Base class for all typing (runtime or static)."""
     name: str = field(kw_only=False)
-    size: int | None = field(kw_only=False)
-    const: bool = field(compare=False, default=False)
     is_builtin: bool = field(default=False)
+
+    def get_size(self) -> int | None:
+        raise NotImplementedError()
+
+    def intrinsic_size(self) -> int | None:
+        return None
 
     def __post_init__(self) -> None:
         pass
 
     # def __instancecheck__(self, __instance: Any) -> bool:
     #     return isinstance(__instance, TypeBase) and __instance.inherits is not None and self in __instance.inherits
-
-    def as_const(self) -> Self:
-        return replace(self, name=getattr(self, 'real_name', self.name), const=True)
 
     # def __eq__(self, __value: object) -> bool:
     #     if type(__value) != TypeBase:
@@ -65,22 +66,35 @@ class TypeBase:  # type: ignore[misc]
     #     )
 
 
-VOID_TYPE = TypeBase('void', size=0, is_builtin=True)
+VOID_TYPE = TypeBase('void', is_builtin=True)
 
 from .integral_types import *
 from .composed_types import *
 
 from .composed_types.generic_types import *
 from .composed_types.generic_types.array import ARRAY_TYPE
-# from .composed_types.generic_types.interface import *
 from .composed_types.generic_types.type_ import *
 
-REF_TYPE_T = GenericType.GenericParam('T')
-REF_TYPE = GenericType('ref', size=4, reference_type=False, generic_params={'T': REF_TYPE_T})
+
+@dataclass(frozen=True, slots=True)
+class RefType(TypeBase):
+    name: str = field(init=False)
+    is_builtin: bool = field(init=False, default=False)
+    to: TypeBase
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'name', f"ref<{self.to.name}>")
+
+    @classmethod
+    def get_size(cls) -> int:
+        from ..compiler.target import TARGET
+        if (target := TARGET.get(None)) is None:
+            raise NotImplementedError("Target platform is not set. Size of ref unknown.")
+        return target.architecture.platform_size(cls)
 
 
-def make_ref(t: TypeBase) -> GenericType:
-    return REF_TYPE.resolve_generic(T=t)
+def make_ref(to: TypeBase) -> RefType:
+    return RefType(to)
 
 
 BUILTINS: dict[str, TypeBase] = {
@@ -88,6 +102,8 @@ BUILTINS: dict[str, TypeBase] = {
     'void': VOID_TYPE,
 
     # Integer Types
+    'int': INT_TYPE,
+    'uint': UINT_TYPE,
     'size_t': SIZE_TYPE,
     'usize_t': USIZE_TYPE,
     'i8': I8_TYPE,

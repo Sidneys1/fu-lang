@@ -41,7 +41,7 @@ FAKE_FILES = (
     (FAKE_TYPE_SHADOWS, "`i32` shadows existing type.", ()),
     (FAKE_TYPE_FORWARD, "Cannot forward-declare types. Please provide an assignment.", ()),
     (FAKE_TYPE_COMPLEX, ..., ()),
-    (FAKE_TYPE_SUBTYPE, ..., ()),
+    (FAKE_TYPE_SUBTYPE, "Nested types aren't currently supported.", ()),
     (FAKE_TYPE_CTOR, ..., ()),
     (FAKE_TYPE_UNASSIGNED, ..., ("Constructor for `foo` does not initialize members `x`.", )),
     (FAKE_TYPE_ASSIGNED, ..., ()),

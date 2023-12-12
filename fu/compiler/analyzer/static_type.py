@@ -1,6 +1,6 @@
 from logging import getLogger
 
-from ...types import TypeBase, StaticType, ComposedType, GenericType, ARRAY_TYPE
+from ...types import TypeBase, ComposedType, GenericType, ARRAY_TYPE  #, StaticType
 
 from .. import CompilerNotice
 from ..lexer import ArrayDef, GenericParamList, Identity, ParamList, Type_
@@ -22,8 +22,8 @@ def type_from_lex(type_: Type_, scope: AnalyzerScope) -> TypeBase:
     assert not isinstance(existing, AnalyzerScope)
     assert isinstance(existing.type, TypeBase)
     actual_type = existing.type
-    if isinstance(actual_type, StaticType):
-        actual_type = actual_type.underlying
+    # if isinstance(actual_type, StaticType):
+    #     actual_type = actual_type.underlying
     if type_.mods:
         return _with_modifiers(actual_type, list(type_.mods), scope)
     return actual_type
@@ -44,7 +44,7 @@ def _with_modifiers(t: TypeBase, mods: list[ParamList | ArrayDef | GenericParamL
                     type_from_lex(x.rhs if isinstance(x, Identity) else x, scope) for x in mod.params
                     if isinstance(x, Type_) or x.rhs != 'namespace')
                 add = '(' + ', '.join(x.name for x in params) + ')'
-                ret = ComposedType(ret.name + add, None, callable=(params, t))
+                ret = ComposedType(ret.name + add, callable=(params, t))
             case GenericParamList():
                 # assert isinstance(ret, )
                 assert isinstance(ret, GenericType), f"Expected Generic Type, got {type(ret).__name__} `{ret.name}`"

@@ -1,90 +1,20 @@
+foo: type = {
+  x: int;
 
-iterator: interface<T> = {
-    value: T(this);
-    op++: this(this);
+  op=: this(this, x: int) = {
+    .x = x;
+  };
 };
 
-
-iterable: interface<T> = {
-    op..: iterator<T>(this);
+bar: type = {
+  x: usize_t;
+  y: foo;
+  z: uint;
+  a: u8;
+  b: u8[];
 };
 
-
-view: interface<T> = {
-    this: iterable<T>;
-    length: usize_t;
-
-    op[]: T(this, size_t);
+baz: type<T> = {
+  x: T;
+  y: u8;
 };
-
-/*
-map_view: type<I, O> = {
-    // Map is a type of view
-    this: view<O>;
-
-    _over: view<I>;
-    _func: O(I);
-    length: usize_t;
-
-    op=: this(over: view<I>, func: O(I)) = {
-        ._over = over;
-        ._func = func;
-        .length = over.length;
-    };
-    op[]: O(this, i: size_t) = {
-        return ._func(._over[i]);
-    };
-    map_iterator: type = {
-        this: iterator<O>;
-        _over: map_view<I, O>;
-        _i: usize_t = 0;
-        op=: this(over: view<O>) = {
-            ._over = over;
-        };
-        value: O(this) = { return ._over[._i]; };
-        op++: this(this) = {  };
-    };
-    op..: iterator<T>(this) = {
-        return map_iterator(this);
-    };
-};
-
-base_str: interface<C> = {
-    // Inherit from a byte view, but we're going to add some convenience
-    // functions specific to strings.
-    this: view<C>;
-
-    // Upper- and lower-case is a transformed view!
-    lower: this(this);
-};
-
-Ascii: interface = {
-    char_t: type = u8;
-    this: base_str<char_t>;
-
-    ascii_lower: u8(in: u8) = {
-        // if (in < 97 || in > 122)
-        //   return in;
-        // return in - 32;
-        return 0;
-    };
-    
-    lower: this(this) = {
-        return map_view(this, ascii_lower);
-    };
-};
-
-str: type = Ascii;
-
-foo: usize_t(bla: Ascii) = {
-    return bla.length;
-};
-
-main: void(args: str[]) = {
-    x: u8[];
-    y: u16(u8);
-    widener: type = map_view<u8, u16>;
-    z: view<u16> = widener(x, y);
-    foo(args[0]);
-};
-*/

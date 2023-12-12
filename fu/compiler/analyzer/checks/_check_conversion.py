@@ -1,6 +1,6 @@
 from typing import Generator, Iterator, Any
 
-from ....types import BOOL_TYPE, VOID_TYPE, EnumType, FloatType, GenericType, InterfaceType, IntType, TypeBase, ThisType, StaticType
+from ....types import BOOL_TYPE, VOID_TYPE, EnumType, FloatType, GenericType, InterfaceType, IntType, TypeBase, ThisType  #, StaticType
 from ... import CompilerNotice
 from ...util import collect_returning_generator
 from ...lexer import CompilerNotice, SourceLocation
@@ -58,13 +58,13 @@ def _check_conversion(from_: TypeBase | StaticVariableDecl, to_: TypeBase | Stat
     match from_, to_:
     # case (TypeBase(size=None), _) | (_, TypeBase(size=None)):
     #     raise NotImplementedError(f"Can't compare types with unknown sizes ({from_.name} and/or {to_.name})...")
-        case IntType(), IntType() if from_.size is not None and to_.size is not None:
+        case IntType(), IntType() if from_.get_size() is not None and to_.get_size() is not None:
             from_min, from_max = from_.range()
             to_min, to_max = to_.range()
             if (from_min < to_min) or (from_max > to_max):
                 yield CompilerNotice(
                     'Warning',
-                    f"Narrowing when implicitly converting from a `{from_.name}` ({from_.size*8}bit {'' if from_.signed else 'un'}signed) to a `{to_.name}` ({to_.size*8}bit {'' if to_.signed else 'un'}signed).",
+                    f"Narrowing when implicitly converting from a `{from_.name}` ({from_.get_size()*8}bit {'' if from_.signed else 'un'}signed) to a `{to_.name}` ({to_.get_size()*8}bit {'' if to_.signed else 'un'}signed).",
                     location=location)
                 return True
         case FloatType(), IntType():

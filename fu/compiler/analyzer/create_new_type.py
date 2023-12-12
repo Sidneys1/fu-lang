@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Iterator
 
-from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, StaticType, InterfaceType
+from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, InterfaceType, RefType  #, StaticType
 from .. import CompilerNotice
 from ..analyzer.resolvers import resolve_type
 from ..analyzer.scope import AnalyzerScope
@@ -22,8 +22,9 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
     assert not (decl.definition is None or isinstance(decl.definition, Type_))
     this = ThisType()
     this_decl = StaticVariableDecl(this, decl)
-    vars: dict[str, StaticVariableDecl] = {}
+    scope_members: dict[str, StaticVariableDecl] = {}
     generic_params: dict[str, GenericType.GenericParam] = {}
+
     if decl.generic_params is not None and len(set(x.value for x in decl.generic_params.params)) != len(
             decl.generic_params.params):
         raise CompilerNotice('Error', "Generic parameter names must be unique.", decl.generic_params.location)
@@ -35,9 +36,11 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                  x.location)
         g = GenericType.GenericParam(x.value)
         generic_params[x.value] = g
-        vars[x.value] = StaticVariableDecl(g, x)
+        scope_members[x.value] = StaticVariableDecl(g, x)
 
-    with AnalyzerScope.new(decl.name.value, AnalyzerScope.Type.Type, vars=vars, this_decl=this_decl) as scope:
+    members: dict[str, StaticVariableDecl] = {}
+
+    with AnalyzerScope.new(decl.name.value, AnalyzerScope.Type.Type, vars=scope_members, this_decl=this_decl) as scope:
         inherits: list[TypeBase] = []
         errors = False
         special_operators: dict[SpecialOperatorType, tuple[tuple[TypeBase, ...], TypeBase]] = {}
@@ -67,7 +70,7 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                         yield ex
                         continue
 
-                    assert isinstance(base, TypeBase)
+                    assert isinstance(base, ComposedType)
                     if isinstance(base, IntegralType):
                         yield CompilerNotice('Error', "Types cannot inherit from integral types.",
                                              element.identity.rhs.location)
@@ -80,7 +83,7 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                         inherits.append(base)
                         continue
                     # Add members from base
-                    for m, t in base.members.items():
+                    for m, t in base.instance_members.items():
                         if m in scope.members:
                             # input(f"interface `{scope.name}` already has a member `{m}`!")
                             yield CompilerNotice('Error',
@@ -93,9 +96,11 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                                  ])
                             errors = True
                             continue
-                        scope.members[m] = t
-                        this.members[m] = t
-                        this_decl.member_decls[m] = StaticVariableDecl(t, element)  # TODO: sorta
+                        # this.members[m] = t
+                        svd = StaticVariableDecl(t, element)
+                        members[m] = svd
+                        scope.members[m] = svd
+                        this_decl.member_decls[m] = svd  # TODO: sorta
                     inherits.append(base)
                     continue
                 case Declaration(identity=SpecialOperatorIdentity()):
@@ -144,44 +149,156 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                         continue
                     _LOG.debug(f"Adding `{name}` to type `{scope.fqdn}` as `{t.name}`.")
                     svd = StaticVariableDecl(t, element)
-                    scope.members[name.value] = t
-                    this.members[name.value] = t
-                    this_decl.member_decls[name.value] = svd
+                    scope.members[name.value] = svd
+                    # members[name.value] = svd
+                    # this.members[name.value] = t
+                    # this_decl.member_decls[name.value] = svd
                     special_operators[name] = t.callable
                     continue
+                case Declaration(identity=Identity()):
+                    name = element.identity.lhs.value
+                    if name in scope.members:
+                        yield CompilerNotice('Error',
+                                             f"Identifier `{name}` already defined for type.",
+                                             element.location,
+                                             extra=[CompilerNotice('Note', "Here.", scope.members[name].location)])
+                        continue
+                    elif (d := scope.in_scope(element.identity.lhs.value)):
+                        yield CompilerNotice("Warning",
+                                             f"{element.identity.lhs.value!r} is shadowing an existing identifier!",
+                                             element.identity.lhs.location,
+                                             extra=[CompilerNotice("Note", "Here.", d.location)])
+
+                    try:
+                        var_type = type_from_lex(element.identity.rhs, scope)
+                    except CompilerNotice as ex:
+                        yield ex
+                        continue
+
+                    if not element.is_fat_arrow and element.initial is not None and not isinstance(
+                            element.initial, (Scope, ExpList)):
+                        try:
+                            rhs_type = resolve_type(element.initial, want=var_type)
+                        except CompilerNotice as ex:
+                            yield ex
+                        else:
+                            # if isinstance(var_type, StaticType) and rhs_type == var_type.underlying:
+                            #     var_type = var_type.underlying
+                            if var_type != rhs_type:
+                                allowed = yield from _check_conversion(rhs_type, var_type, element.initial.location)
+                                if not allowed:
+                                    continue
+                    # Add to current scope
+
+                    _LOG.debug(f"Adding {name} to {scope.fqdn} as {var_type.name}")
+                    # input()
+                    svd = StaticVariableDecl(var_type,
+                                             element,
+                                             fqdn=(scope.fqdn + '.' + name) if scope.parent is not None else name)
+                    scope.members[name] = svd
+                    members[name] = svd
+                    if scope.this_decl is not None:
+                        scope.this_decl.member_decls[name] = svd
+                case TypeDeclaration():
+                    raise CompilerNotice("Error", "Nested types aren't currently supported.", element.location)
+
+                case _:
+                    raise NotImplementedError(f"Don't know how to do `{element}`")
                 # case Declaration():
                 #     raise NotImplementedError(f"Don't know how to create from {elems}")
-                # case TypeDeclaration(initial=None):
-                #     raise NotImplementedError(f"Don't know how to create from {elems}")
-            from . import _populate
-            yield from _populate(element)
+            # from . import _populate
+            # input(f"Populating from {element}")
+            # yield from _populate(element)
+
         if errors:
             _LOG.warning('Aborting type creation: there were errors!')
             return
+
         for k, v in scope.members.items():
             if isinstance(v, StaticScope):
                 raise NotImplementedError("Nested type scopes??")
 
-        members = {k: v for k, v in this.members.items() if not isinstance(v, StaticScope)}
-
         # TODO: calc size
+
         if decl.generic_params:
-            new_type = GenericType(decl.name.value,
-                                   size=None,
-                                   reference_type=True,
-                                   inherits=inherits,
-                                   instance_members=members,
-                                   special_operators=special_operators,
-                                   generic_params=generic_params)
+            new_type = GenericType(
+                decl.name.value,
+                # size=None,
+                #    reference_type=True,
+                inherits=inherits,
+                instance_members={
+                    k: v.type
+                    for k, v in members.items()
+                },
+                special_operators=special_operators,
+                generic_params=generic_params)
         else:
-            new_type = ComposedType(decl.name.value,
-                                    size=None,
-                                    reference_type=True,
-                                    inherits=inherits,
-                                    instance_members=members,
-                                    special_operators=special_operators)
+            new_type = ComposedType(
+                decl.name.value,
+                # size=None,
+                # reference_type=True,
+                inherits=inherits,
+                instance_members={
+                    k: v.type
+                    for k, v in members.items()
+                },
+                special_operators=special_operators)
         # input(f"Resolving this of {new_type.name}")
         this.resolve(new_type)
-        outer_scope.members[decl.name.value] = StaticVariableDecl(StaticType.of(new_type),
+
+        _debug_type(new_type)
+
+        # input(new_type)
+        outer_scope.members[decl.name.value] = StaticVariableDecl(new_type,
                                                                   decl,
                                                                   member_decls={**this_decl.member_decls})
+
+
+def _debug_type(new_type: GenericType | ComposedType) -> None:
+    _LOG.debug(f"New type: `{new_type.name}`")
+    size = new_type.get_size()
+    _LOG.debug(f"\tSize: {size if size is not None else '???'}")
+    slots: list[str] = []
+    tot = 0
+    known = True
+    for k, v in new_type.instance_members.items():
+        size: int
+        tname: str
+        pos = f"{tot:#04x}" if known else '0x??'
+        if isinstance(v, GenericType.GenericParam):
+            _LOG.debug(f"\t * {pos} `.{k}: {v.name}`: Generic Parameter, Unknown Size ")
+            known = False
+            continue
+
+        if isinstance(v, ComposedType):
+            size = RefType.get_size()
+            tname = f'ref<{v.name}>'
+        else:
+            tname = v.name
+            size = v.get_size()
+
+        sz = tot % size
+        if sz:
+            sz = size - sz
+            div = sz * 2
+            pname = '--'
+            if len(pname) > div:
+                pname = pname[:-2] + '..'
+            cname = pname.rjust(int(div + 0.5) // 2 + (len(pname) // 2)).ljust(div)
+            slots.append(cname)
+            _LOG.debug(f"\t * {pos} - {sz} bytes of alignment padding -")
+            tot += sz
+            pos = f"{tot:#04x}" if known else '0x??'
+
+        aname = '.' + k
+        _LOG.debug(f"\t * {pos} `{aname}: {tname}`:\t{size}")
+
+        tot += size
+        div = size * 2
+        if len(aname) > div:
+            aname = aname[:-2] + '..'
+        cname = aname.rjust(int(div + 0.5) // 2 + (len(aname) // 2)).ljust(div)
+        slots.append(cname)
+    if known:
+        _LOG.debug(f"\t |{'|'.join(slots)}|")
+    # input()

@@ -27,7 +27,7 @@ def _emit_if_body(content: Scope | Statement | ReturnStatement,
 
 
 def _emit_if_head(term: Expression, buffer: BytesIO, next_case: Label) -> Iterator[TempSourceMap]:
-    from .convert_to_stack import convert_to_stack
+    from ._convert_to_stack import convert_to_stack
     start = buffer.tell()
     storage = yield from compile_expression(term, buffer, BOOL_TYPE)
     convert_to_stack(storage, BOOL_TYPE, buffer, term.location)

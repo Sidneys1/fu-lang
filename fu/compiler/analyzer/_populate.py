@@ -1,7 +1,7 @@
 from contextlib import ExitStack
 from typing import Iterator
 
-from ...types.composed_types.generic_types.type_ import StaticType
+# from ...types.composed_types.generic_types.type_ import StaticType
 from .. import CompilerNotice
 from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_, TypeDeclaration
 from . import _LOG
@@ -107,7 +107,8 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
 
             if isinstance(element.definition, Type_):
-                scope.members[name] = StaticVariableDecl(StaticType(type_from_lex(element.definition, scope)),
+                # raise NotImplementedError(str(element.definition))
+                scope.members[name] = StaticVariableDecl(type_from_lex(element.definition, scope),
                                                          element,
                                                          fqdn=(scope.fqdn + '.' +
                                                                name) if scope.parent is not None else name)
@@ -181,9 +182,9 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 except CompilerNotice as ex:
                     yield ex
                 else:
-                    if isinstance(var_type, StaticType) and rhs_type == var_type.underlying:
-                        var_type = var_type.underlying
-                    elif var_type != rhs_type:
+                    # if isinstance(var_type, StaticType) and rhs_type == var_type.underlying:
+                    #     var_type = var_type.underlying
+                    if var_type != rhs_type:
                         allowed = yield from _check_conversion(rhs_type, var_type, element.initial.location)
                         if not allowed:
                             return
@@ -197,7 +198,7 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
             scope.members[name] = svd
             if scope.this_decl is not None:
                 scope.this_decl.member_decls[name] = svd
-                scope.this_decl.type.members[name] = var_type
+                # scope.this_decl.type.resolved.members[name] = var_type
         case Document():
             for decl in element.content:
                 # try:

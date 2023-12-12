@@ -19,7 +19,6 @@ class ThisType(TypeBase):  # type: ignore[misc]
     """Represents the temporary value of `this` while still defining a type."""
     name: str = field(init=False, default='this')
     size: None = field(init=False, default=None)
-    const: Literal[False] = field(init=False, default=False)
     is_builtin: Literal[False] = field(init=False, default=False)
 
     resolved: Optional['ComposedType'] = field(init=False, default=None)
@@ -37,8 +36,49 @@ class ThisType(TypeBase):  # type: ignore[misc]
 class ComposedType(TypeBase):  # type: ignore[misc]
     """Represents a type built of other types."""
 
-    reference_type: bool = field(default=True)
-    """Whether or not instances of this type is passed by ref (True) or value (False)."""
+    # reference_type: bool = field(default=True)
+    # """Whether or not instances of this type is passed by ref (True) or value (False)."""
+
+    _instance_cache: Optional['ComposedType'] = None
+
+    def get_size(self) -> int:
+        total = 0
+        for k, m in self.instance_members.items():
+            if (size := m.get_size()) is None:
+                # This should never happen...
+                raise NotImplementedError(f"`sizeof({self.name}.{k})` is unexpectedly None!")
+
+            if isinstance(m, ComposedType):
+                from .. import RefType
+                size = RefType.get_size()
+
+            total += size
+            if (rem := total % size):
+                total += size - rem
+        return total
+
+    def intrinsic_size(self) -> int | None:
+        total = 0
+        for m in self.instance_members.values():
+            if (size := m.intrinsic_size()) is None:
+                return None
+
+            if isinstance(m, ComposedType):
+                from .. import RefType
+                size = RefType.get_size()
+
+            total += size
+            total += size
+            if (rem := total % size):
+                total += size - rem
+        return total
+
+    @property
+    def instance_type(self) -> 'ComposedType':
+        if self._instance_cache is not None:
+            return self._instance_cache
+        # TODO: Populate instance cache
+        return None
 
     inherits: tuple['TypeBase', ...] | None = None
     """Inheritance chain."""

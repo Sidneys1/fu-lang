@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, replace, InitVar
 from logging import getLogger
 from typing import Self, Union, ClassVar, cast, Literal
 
@@ -180,7 +180,6 @@ def _rebuild_generic_type(t: 'GenericType',
     # inherits.insert(0, t)
 
     # if still_generic:
-    from .type_ import StaticType
 
     if not still_generics:
         # TODO: calculate size
@@ -188,10 +187,10 @@ def _rebuild_generic_type(t: 'GenericType',
 
     kwargs: dict = dict(
         name=t.real_name,  # pylint: disable=protected-access
-        size=None,
+        # size=None,
         inherits=tuple(inherits),
         indexable=indexable,
-        reference_type=t.reference_type,
+        # reference_type=t.reference_type,
         callable=callable_,
         instance_members=instance_members,
         static_members=static_members,
@@ -200,16 +199,18 @@ def _rebuild_generic_type(t: 'GenericType',
         generic_params=all_params,
         generic_inheritance=tuple(generic_inheritance))
 
-    if isinstance(t, StaticType):
-        # These are computed values for TypeTypes...
-        del kwargs['name']
-        del kwargs['size']
-        del kwargs['inherits']
-        del kwargs['indexable']
-        del kwargs['callable']
-        del kwargs['reference_type']
-        del kwargs['instance_members']
-        del kwargs['static_members']
+    # from .type_ import StaticType
+    # if isinstance(t, StaticType):
+    #     # These are computed values for TypeTypes...
+    #     del kwargs['name']
+    #     # del kwargs['size']
+    #     # del kwargs['inherits']
+    #     # del kwargs['indexable']
+    #     # del kwargs['callable']
+    #     # del kwargs['reference_type']
+    #     # del kwargs['instance_members']
+    #     # del kwargs['static_members']
+    #     # del kwargs['readonly']
 
     _LOG.debug('1')
     ret = type(t)(**kwargs)
@@ -228,9 +229,13 @@ class GenericType(ComposedType):
     @dataclass(frozen=True, kw_only=True, slots=True, eq=False)
     class GenericParam(TypeBase):
         """A generic unresolved parameter type."""
-        size: None = field(init=False, default=None)
         is_builtin: ClassVar[bool] = field(init=False, default=False)  # type: ignore[misc]
-        const: Literal[False] = field(init=False, default=False)
+
+        def get_size(self) -> int | None:
+            return None
+
+        def intrinsic_size(self) -> int | None:
+            return None
 
         def __eq__(self, __value: object) -> bool:
             return isinstance(__value, GenericType.GenericParam)
@@ -238,6 +243,14 @@ class GenericType(ComposedType):
     real_name: str = field(init=False)
     generic_params: dict[str, TypeBase]
     generic_inheritance: tuple['GenericType', ...] = ()
+
+    def is_still_generic(self) -> bool:
+        return any(isinstance(x, GenericType.GenericParam) for x in self.generic_params.values())
+
+    def get_size(self) -> int | None:
+        if self.is_still_generic():
+            return None
+        return ComposedType.get_size(self)
 
     def __post_init__(self):
         ComposedType.__post_init__(self)
@@ -264,10 +277,10 @@ class GenericType(ComposedType):
             return False
 
         # Ignore self.name in favor of self.real_name
-        ours = (self.real_name, self.size, self.reference_type, self.inherits, self.indexable, self.callable,
-                self.instance_members, self.static_members, self.readonly, self.special_operators)
-        theirs = (self.real_name, self.size, self.reference_type, self.inherits, self.indexable, self.callable,
-                  self.instance_members, self.static_members, self.readonly, self.special_operators)
+        ours = (self.real_name, self.inherits, self.indexable, self.callable, self.instance_members,
+                self.static_members, self.readonly, self.special_operators)
+        theirs = (self.real_name, self.inherits, self.indexable, self.callable, self.instance_members,
+                  self.static_members, self.readonly, self.special_operators)
 
         if ours != theirs:
             return False

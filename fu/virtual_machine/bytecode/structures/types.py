@@ -20,7 +20,7 @@ class BytecodeType(BytecodeBase):
     class Type(Enum):
         TYPE_DEFINITION = 0
         IMPORTED_TYPE = 1
-        VOID = 1
+        VOID = 2
 
     type_: Type = Type.TYPE_DEFINITION
     _underlying: TypeBase | None

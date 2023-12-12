@@ -2,7 +2,7 @@
 Integral types (numerics).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, InitVar
 from typing import Any, Self
 from abc import ABC, abstractmethod
 
@@ -15,15 +15,18 @@ class IntegralType(ABC, TypeBase):  # type: ignore[misc]
 
     # Integral types are always builtin
     is_builtin: bool = field(init=False, default=True)
+    _size: int | None = field(init=False, default=None)
 
-    @abstractmethod
-    def could_hold_value(self, value: Any) -> bool:
-        ...
+    def get_size(self) -> int:
+        if (size := self._size) is not None:
+            return size
+        from ..compiler.target import TARGET
+        if (target := TARGET.get(None)) is None:
+            raise NotImplementedError(f'Target platform not set. Size of `{self.name}` unknown.')
+        return target.architecture.platform_size(self)
 
-    @classmethod
-    @abstractmethod
-    def best_for_value(cls, value: Any) -> Self:
-        ...
+    def intrinsic_size(self) -> int | None:
+        return self._size
 
 
 #
@@ -34,11 +37,15 @@ class IntegralType(ABC, TypeBase):  # type: ignore[misc]
 @dataclass(frozen=True, kw_only=True, slots=True)
 class IntType(IntegralType):  # type: ignore[misc]
     """Describes a type that is an integer number (ℤ)."""
-    size: int
     signed: bool
+    size: InitVar[int | None] = None
+
+    def __post_init__(self, size: int | None) -> None:
+        TypeBase.__post_init__(self)
+        object.__setattr__(self, '_size', size)
 
     def range(self) -> tuple[int, int]:
-        max_ = (2**(self.size * 8)) - 1
+        max_ = (2**(self.get_size() * 8)) - 1
         min_ = 0
         if self.signed:
             max_ = max_ // 2
@@ -66,8 +73,11 @@ U32_TYPE = IntType('u32', size=4, signed=False)
 I64_TYPE = IntType('i64', size=8, signed=True)
 U64_TYPE = IntType('u64', size=8, signed=False)
 
-SIZE_TYPE = IntType('size_t', size=8, signed=True)
-USIZE_TYPE = IntType('usize_t', size=8, signed=False)
+INT_TYPE = IntType('int', signed=True)
+UINT_TYPE = IntType('uint', signed=True)
+
+SIZE_TYPE = IntType('size_t', signed=True)
+USIZE_TYPE = IntType('usize_t', signed=False)
 
 _SIGNED_TYPES = (I8_TYPE, I16_TYPE, I32_TYPE, I64_TYPE)
 _UNSIGNED_TYPES = (U8_TYPE, U16_TYPE, U32_TYPE, U64_TYPE)
@@ -80,11 +90,15 @@ _UNSIGNED_TYPES = (U8_TYPE, U16_TYPE, U32_TYPE, U64_TYPE)
 @dataclass(frozen=True, kw_only=True, slots=True)
 class FloatType(IntegralType):  # type: ignore[misc]
     """Describes a IEEE floating point number."""
-    size: int
     exp_bits: int
+    size: InitVar[int]
+
+    def __post_init__(self, size: int) -> None:
+        TypeBase.__post_init__(self)
+        object.__setattr__(self, '_size', size)
 
     def could_hold_value(self, value: float) -> bool:
-        if not isinstance(value, float):
+        if not isinstance(value, (float, int)):
             raise ValueError()
         return True
 
@@ -103,12 +117,11 @@ F64_TYPE = FloatType('f64', size=8, exp_bits=11)
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class EnumType(IntType):  # type: ignore[misc]
+class EnumType(IntegralType):  # type: ignore[misc]
     """Describes a type that is a set of scoped integral literals."""
-    size: int = field(init=False)
+    signed: bool
     values: dict[str, int] = field(kw_only=False)
     inherits: tuple[IntType] = field(default=())  # type: ignore[assignment]
-
     is_builtin: bool = field(default=False)
 
     def __post_init__(self) -> None:
@@ -127,7 +140,7 @@ class EnumType(IntType):  # type: ignore[misc]
                 raise ValueError("No integer type exists that can satisfy an enumeration with inclusive range "
                                  f"{min_val}-{max_val}.")
             object.__setattr__(self, 'inherits', (selection, ))
-        object.__setattr__(self, 'size', self.inherits[0].size)
+        object.__setattr__(self, '_size', self.inherits[0]._size)  # pylint: disable=protected-access
 
 
 BOOL_TYPE = EnumType('bool', {'false': 0, 'true': 1}, inherits=(U8_TYPE, ), signed=False, is_builtin=True)

@@ -191,6 +191,11 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                                      location=element.rhs.location)
                 return
             lhs_type = resolve_type(element.lhs)
+            if isinstance(lhs_type, AnalyzerScope):
+                if element.rhs.value not in lhs_type.members:
+                    yield CompilerNotice('Error',
+                                         f"Scope `{lhs_type.name}` does not have a `{element.rhs.value}` member.")
+                return
             lhs_decl = None
             if isinstance(lhs_type, StaticVariableDecl):
                 lhs_decl = lhs_type
@@ -214,7 +219,10 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                                      element.location)
                 return
             assert isinstance(this_type, StaticVariableDecl)
-            if name not in this_type.type.members:
+            assert isinstance(this_type.type, ThisType), f"Expected `ThisType`, got `{type(this_type).__name__}`"
+
+            if name not in this_type.type.resolved.instance_members and name not in this_type.type.resolved.static_members:
+                input(this_type.type.resolved)
                 yield CompilerNotice('Error', f"`this` (`{this_type.name}`) does not have a member {name!r}.",
                                      element.rhs.location)
                 return
@@ -278,26 +286,26 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                 #     yield CompilerNotice('Error', f'Parameter mismatch. Got {rhs_params}', element.rhs.location)
                 return
 
-            if decl_lhs is not None and isinstance(type_of_lhs, StaticType):
-                underlying = type_of_lhs.underlying
-                print(f"`{element.lhs}` is a type! We're constructing a `{underlying.name}`!")
-                assert type_of_lhs.callable[1] == underlying
-                if isinstance(underlying, GenericType) and any(
-                        isinstance(x, GenericType.GenericParam) for x in underlying.generic_params.values()):
-                    # TODO: generic type deduction?
-                    # still_generic = {
-                    #     k: v
-                    #     for k, v in underlying.generic_params.items() if isinstance(v, GenericType.GenericParam)
-                    # }
-                    # print(f"\tAnd it's still generic on `{'`, `'.join(still_generic.keys())}`!")
-                    # print(f"{','.join(x.name for x in type_of_lhs.callable[0])}")
-                    # ctor_generics = {
-                    #     k: v
-                    #     for k, v in still_generic.items() if any(v is p for p in type_of_lhs.callable[0])
-                    # }
-                    # print(f"\tCtor takes generic params `{'`, `'.join(ctor_generics.keys())}`!")
-                    # input('')
-                    raise NotImplementedError()
+            # if decl_lhs is not None and isinstance(type_of_lhs, StaticType):
+            #     underlying = type_of_lhs.underlying
+            #     print(f"`{element.lhs}` is a type! We're constructing a `{underlying.name}`!")
+            #     assert type_of_lhs.callable[1] == underlying
+            #     if isinstance(underlying, GenericType) and any(
+            #             isinstance(x, GenericType.GenericParam) for x in underlying.generic_params.values()):
+            #         # TODO: generic type deduction?
+            #         # still_generic = {
+            #         #     k: v
+            #         #     for k, v in underlying.generic_params.items() if isinstance(v, GenericType.GenericParam)
+            #         # }
+            #         # print(f"\tAnd it's still generic on `{'`, `'.join(still_generic.keys())}`!")
+            #         # print(f"{','.join(x.name for x in type_of_lhs.callable[0])}")
+            #         # ctor_generics = {
+            #         #     k: v
+            #         #     for k, v in still_generic.items() if any(v is p for p in type_of_lhs.callable[0])
+            #         # }
+            #         # print(f"\tCtor takes generic params `{'`, `'.join(ctor_generics.keys())}`!")
+            #         # input('')
+            #         raise NotImplementedError()
 
             if element.rhs is None:
                 if type_of_lhs.callable[0]:
@@ -337,8 +345,8 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             except CompilerNotice as ex:
                 yield ex
                 return
-            if lhs_member_decl.type.const:
-                yield CompilerNotice('Error', f"Cannot assign to a const variable.", element.location)
+            if lhs_member_decl.const:
+                yield CompilerNotice('Error', "Cannot assign to a const variable.", element.location)
             if isinstance(rhs_type, StaticScope):
                 yield CompilerNotice('Error', f"Cannot assign a Scope to a `{lhs_member_decl.type.name}`.",
                                      element.location)

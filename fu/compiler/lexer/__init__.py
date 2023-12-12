@@ -44,10 +44,10 @@ def parse(istream: ImmutableTokenStream) -> Optional['Document']:
     try:
         return Document.try_lex(istream)
     except LexError as ex:
-        _LOG.error("%sFailed to lex `Document`: %s", 'x ' * istream.depth, ex)
+        _LOG.debug("%sFailed to lex `Document`: %s", 'x ' * istream.depth, ex)
     except StreamExpectError as ex:
         expected = ex.expected.__name__ if isinstance(ex.expected, type) else repr(ex.expected)
-        _LOG.error("%sFailed to lex `Document`: Expected %s, got %r", 'x ' * istream.depth, expected, ex.got)
+        _LOG.debug("%sFailed to lex `Document`: Expected %s, got %r", 'x ' * istream.depth, expected, ex.got)
     return None
 
 
@@ -73,7 +73,7 @@ class Lex(ABC):
                     _LOG.debug("%sWas a `%s`!", 'y ' * istream.depth, cls.__name__)
                 return ret
             except LexWarning as ex:
-                _LOG.warning("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
+                _LOG.debug("%sFailed to lex `%s`: %s", 'x ' * istream.depth, cls.__name__, ex)
             # except EOFError as ex:
             #     _LOG.error("%sFailed to lex `%s`: Reached end of file", 'x ' * istream.depth, cls.__name__)
             except QuietStreamExpectError:

@@ -1,2 +1,31 @@
-x x x x x x Failed to lex `Identity`: Expected Colon
-INFO:fu.compiler:Output binary `a.out`: 306 Bytes
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "S:\fugly-compiler\fu\__main__.py", line 142, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "S:\fugly-compiler\fu\__main__.py", line 96, in main
+    return compiler_main(ns)
+           ^^^^^^^^^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\main.py", line 144, in main
+    binary, c_errors = collect_returning_generator(compile_binary())
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\util.py", line 68, in collect_returning_generator
+    ret2 = list(_())
+           ^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\util.py", line 66, in _
+    ret = yield from generator
+          ^^^^^^^^^^^^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\compile\__init__.py", line 68, in compile_binary
+    main_func = compile_func(main_func_id, main)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\compile\__init__.py", line 228, in compile_func
+    for source_loc in compile_blocks(element.initial.content, buffer):
+  File "S:\fugly-compiler\fu\compiler\compile\__init__.py", line 150, in compile_blocks
+    yield from compile_statement(statement, buffer)
+  File "S:\fugly-compiler\fu\compiler\compile\__init__.py", line 124, in compile_statement
+    return_storage = yield from compile_expression(statement.value, buffer, want=fn_ret)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "S:\fugly-compiler\fu\compiler\compile\_compile_expression.py", line 171, in compile_expression
+    raise NotImplementedError()
+NotImplementedError

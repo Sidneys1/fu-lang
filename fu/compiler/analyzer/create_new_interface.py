@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Iterator
 
-from ...types import GenericType, InterfaceType, ThisType, TypeBase, StaticType, IntegralType
+from ...types import GenericType, InterfaceType, ThisType, TypeBase, IntegralType  #, StaticType
 from .. import CompilerNotice
 from ..lexer import *
 from .resolvers import resolve_type
@@ -171,7 +171,7 @@ def create_new_interface(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> I
 
         # TODO: calc size
         new_type = InterfaceType(decl.name.value,
-                                 size=None,
+                                 get_size=None,
                                  reference_type=True,
                                  inherits=inherits,
                                  instance_members=members,

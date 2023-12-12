@@ -9,81 +9,79 @@ from ....compiler.tokenizer import SpecialOperatorType
 from ... import TypeBase
 from . import ComposedType, ThisType, GenericType, CallSignature
 
+# def _type_generics():
+#     return {'T': StaticType.TYPE_T}
 
-def _type_generics():
-    return {'T': StaticType.TYPE_T}
+TYPE_TYPE = TypeBase('type', is_builtin=True)
 
+# @dataclass(frozen=True, kw_only=True, slots=True)
+# class StaticType(GenericType):  # type: ignore[misc]
+#     """Describes the static storage of a class (not an instance of one)."""
 
-TYPE_TYPE = TypeBase('type', size=None, is_builtin=True)
+#     TYPE_T: ClassVar[GenericType.GenericParam] = GenericType.GenericParam('T')  # pylint: disable=too-many-function-args
 
+#     of: InitVar[ComposedType] = field(kw_only=False, default=TYPE_T)
 
-@dataclass(frozen=True, kw_only=True, slots=True)
-class StaticType(GenericType):  # type: ignore[misc]
-    """Describes the static storage of a class (not an instance of one)."""
+#     name: str = field(init=False, default='Static')
+#     underlying: ComposedType = field(init=False)
+#     const: bool = field(default=False)
+#     is_builtin: bool = field(init=False, default=False)
+#     special_operators: dict[SpecialOperatorType, CallSignature] = field(default_factory=dict)
 
-    TYPE_T: ClassVar[GenericType.GenericParam] = GenericType.GenericParam('T')  # pylint: disable=too-many-function-args
+#     indexable: tuple[TypeBase, ...] | None = field(default=None)  # type: ignore
 
-    of: InitVar[ComposedType] = field(kw_only=False, default=TYPE_T)
+#     generic_params: dict[str, TypeBase] = field(init=False, default_factory=dict)
 
-    name: str = field(init=False, default='Static')
-    underlying: ComposedType = field(init=False)
-    const: bool = field(init=False, default=False)
-    is_builtin: bool = field(init=False, default=False)
-    special_operators: dict[SpecialOperatorType, CallSignature] = field(init=False, default_factory=dict)
+#     size: int | None = field(default=None)
+#     instance_members: OrderedDict[str, TypeBase] = field(default_factory=OrderedDict)
+#     static_members: OrderedDict[str, TypeBase] = field(default_factory=OrderedDict)
+#     readonly: set[str] = field(default_factory=set)
+#     inherited_members: set[str] = field(default_factory=set)
+#     generic_inheritance: tuple[GenericType, ...] = field(default=())
 
-    indexable: tuple[TypeBase, ...] | None = field(init=False, default=None)  # type: ignore
+#     reference_type: bool = field(init=False, default=True)
 
-    generic_params: dict[str, TypeBase] = field(init=False, default_factory=dict)
+#     inherits: tuple[TypeBase] = field(default=())  # type: ignore[misc]
 
-    size: int | None = field(init=False, default=None)
-    instance_members: OrderedDict[str, TypeBase] = field(init=False, default_factory=OrderedDict)
-    static_members: OrderedDict[str, TypeBase] = field(init=False, default_factory=OrderedDict)
-    readonly: set[str] = field(init=False, default_factory=set)
-    inherited_members: set[str] = field(init=False, default_factory=set)
-    generic_inheritance: tuple[GenericType, ...] = field(init=False, default=())
+#     callable: CallSignature | None = field(init=False, default=None)
 
-    reference_type: bool = field(init=False, default=True)
+#     # pylint: disable=arguments-differ
+#     def __post_init__(self, of: ComposedType | GenericType.GenericParam) -> None:  # type: ignore[override]
+#         GenericType.__post_init__(self)
 
-    inherits: tuple[TypeBase] = field(init=False)  # type: ignore[misc]
+#         self.generic_params['T'] = of
 
-    callable: CallSignature | None = field(init=False, default=None)
+#         if of is StaticType.TYPE_T:
+#             return
 
-    # pylint: disable=arguments-differ
-    def __post_init__(self, of: ComposedType | GenericType.GenericParam) -> None:  # type: ignore[override]
-        GenericType.__post_init__(self)
+#         # Make sure T is in fact a type...
+#         assert isinstance(of, TypeBase), f"Underlying is unexpectedly a {type(self.underlying).__name__}!"
 
-        self.generic_params['T'] = of
+#         _set = partial(object.__setattr__, self)
 
-        if of is StaticType.TYPE_T:
-            return
+#         # Set underlying property to match T
+#         _set('underlying', of)
 
-        # Make sure T is in fact a type...
-        assert isinstance(of, TypeBase), f"Underlying is unexpectedly a {type(self.underlying).__name__}!"
+#         # self.generic_params.
 
-        _set = partial(object.__setattr__, self)
+#         # update callable
+#         # TODO: static-only types?
+#         if isinstance(self.underlying, ComposedType):
+#             if SpecialOperatorType.Constructor in self.underlying.special_operators:
+#                 params, ret = self.underlying.special_operators[SpecialOperatorType.Constructor]
+#             else:
+#                 params, ret = (), self.underlying.this_type
 
-        # Set underlying property to match T
-        _set('underlying', of)
+#             assert isinstance(ret, ThisType)
+#             # assert ret.resolved is not None and ret.resolved is self.underlying, f"{ret.resolved=} for {self.underlying.name}"
 
-        # update callable
-        # TODO: static-only types?
-        if isinstance(self.underlying, ComposedType):
-            if SpecialOperatorType.Constructor in self.underlying.special_operators:
-                params, ret = self.underlying.special_operators[SpecialOperatorType.Constructor]
-            else:
-                params, ret = (), self.underlying.this_type
+#             _set('callable', (params, ret))
 
-            assert isinstance(ret, ThisType)
-            # assert ret.resolved is not None and ret.resolved is self.underlying, f"{ret.resolved=} for {self.underlying.name}"
+# TODO: update size
 
-            _set('callable', (params, ret))
-
-        # TODO: update size
-
-    # @staticmethod
-    # def of(t: TypeBase) -> 'StaticType':
-    #     return StaticType().resolve_generic(T=t)
-
+# @staticmethod
+# def of(t: TypeBase) -> 'StaticType':
+#     return StaticType().resolve_generic(T=t)
 
 # StaticType()
 
@@ -120,4 +118,4 @@ class StaticType(GenericType):  # type: ignore[misc]
 
 # TypeType.indexable = property(_typetype_indexable)  # type: ignore[misc,assignment]
 
-__all__ = ('StaticType', 'TYPE_TYPE')
+__all__ = ('TYPE_TYPE', )

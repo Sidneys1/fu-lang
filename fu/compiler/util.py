@@ -1,8 +1,10 @@
 import sys
+from logging import getLogger, Logger
 import argparse
 from contextlib import contextmanager
-from contextvars import ContextVar
-from typing import Any, Iterator, Sequence, Type, TypeGuard, TypeVar, Generator
+from contextvars import ContextVar, Token
+from types import TracebackType
+from typing import Any, Iterator, Sequence, Type, TypeGuard, TypeVar, Generator, Callable, Generic
 
 T = TypeVar('T')
 
@@ -10,11 +12,41 @@ T = TypeVar('T')
 @contextmanager
 def set_contextvar(var: ContextVar[T], value: T) -> Iterator[T]:
     """Sets a context variable to a value and restores it when done."""
+    reset = var.set(value)
     try:
-        reset = var.set(value)
         yield value
     finally:
         var.reset(reset)
+
+
+class ScopedFinalizer:
+
+    def __init__(self, finalizer: Callable[[], None]) -> None:
+        from weakref import finalize
+        self._finalizer = finalize(self, finalizer)
+
+    def manually_finalize(self) -> None:
+        self._finalizer()
+
+
+class ScopedContextVar(ScopedFinalizer):
+    _token: Token | None = None
+    _var: ContextVar
+    _log: Logger
+
+    def __init__(self, var: ContextVar[T], value: T) -> None:
+        super().__init__(self._reset)
+        self._log = getLogger(__package__ + f'.ScopedContextVar<{var.name}>')
+        self._var = var
+        self._log.debug(f"Setting value to `{value!r}`.")
+        self._token = var.set(value)
+
+    def _reset(self) -> None:
+        if self._token is None:
+            return
+        self._log.debug("Resetting value.")
+        self._var.reset(self._token)
+        self._token = None
 
 
 def is_sequence_of(s: Sequence[Any], _type: Type[T]) -> TypeGuard[Sequence[T]]:  # pragma: no cover

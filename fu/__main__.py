@@ -18,7 +18,7 @@ def make_common_args() -> ArgumentParser:
 
     return parser
 
-from .compiler.__main__ import make_compiler_parser, CompilerParsedArgs
+from .compiler.main import make_compiler_parser, CompilerParsedArgs
 
 class _SharedParser(Protocol):
     class _SharedParsedArgs(CommonParsedArgs, CompilerParsedArgs, Protocol):
@@ -92,7 +92,7 @@ def main() -> int:
     ns = _make_parser().parse_args()
     match ns.cmd:
         case 'build':
-            from .compiler.__main__ import main as compiler_main
+            from .compiler.main import main as compiler_main
             return compiler_main(ns)
         case 'run':
             from .virtual_machine.bytecode.structures.binary import BytecodeBinary

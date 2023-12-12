@@ -1,7 +1,7 @@
 ----------- test\regression\fibonacci.fu -----------
-[2m   3 |   return fib(n [0;2m- 1[2m) + fib(n - 2);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\fibonacci.fu:3:16-18)
+[2m   3 |   return fib([0;2mn - 1[2m) + fib(n - 2);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\fibonacci.fu:3:14-18)
 [0m[m[0;2m-----+[0m
-[2m   3 |   return fib(n - 1) + fib(n [0;2m- 2[2m);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\fibonacci.fu:3:29-31)
+[2m   3 |   return fib(n - 1) + fib([0;2mn - 2[2m);[0m[0;0m <-- Checks for infix operator '-' are not implemented! [0;2m(test\regression\fibonacci.fu:3:27-31)
 [0m[m[0;2m-----+[0m
-[2m   3 |   return fib[0;2m(n - 1) + fib(n - 2);[2m[0m[0;0m <-- Checks for infix operator '+' are not implemented! [0;2m(test\regression\fibonacci.fu:3:13-33)
+[2m   3 |   return [0;2mfib(n - 1) + fib(n - 2);[2m[0m[0;0m <-- Checks for infix operator '+' are not implemented! [0;2m(test\regression\fibonacci.fu:3:10-33)
 [0m[m

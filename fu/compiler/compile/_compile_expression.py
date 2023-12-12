@@ -1,11 +1,9 @@
 from io import BytesIO
 from typing import Generator
 
-from .convert_to_stack import convert_to_stack
-
 from ...types import (TypeBase, IntegralType, IntType, FloatType, EnumType, GenericType, BOOL_TYPE, F16_TYPE, F32_TYPE,
                       F64_TYPE, I16_TYPE, I32_TYPE, I64_TYPE, I8_TYPE, U16_TYPE, U32_TYPE, U64_TYPE, U8_TYPE,
-                      USIZE_TYPE, ARRAY_TYPE, REF_TYPE, make_ref)
+                      USIZE_TYPE, ARRAY_TYPE, RefType, make_ref, ComposedType)
 from ...virtual_machine.bytecode import NumericTypes, OpcodeEnum, _encode_numeric, int_u64, int_u8, float_f32, int_u32
 
 from .. import CompilerNotice
@@ -20,6 +18,7 @@ from .scope import CompileScope, FunctionScope
 from .storage import Storage, StorageDescriptor
 from .util import write_to_buffer
 from ._retrieve import retrieve
+from ._convert_to_stack import convert_to_stack
 
 
 def compile_expression(expression: Lex,
@@ -139,10 +138,10 @@ def compile_expression(expression: Lex,
 
             # input(f'Ran retrieve, lhs storage is now {lhs_storage}')
             _LOG.debug(f"...new storage is {lhs_storage.type.name}")
-            if isinstance(lhs_storage.type, GenericType) and REF_TYPE in lhs_storage.type.generic_inheritance:  # type: ignore # noqa: W1116  # pylint:disable=isinstance-second-argument-not-valid-type
-                assert isinstance(lhs_storage.type, GenericType)
-                lhs_deref = lhs_storage.type.generic_params['T']
-                assert not isinstance(lhs_deref, GenericType.GenericParam)
+            if isinstance(lhs_storage.type, RefType):  # type: ignore # noqa: W1116  # pylint:disable=isinstance-second-argument-not-valid-type
+                assert isinstance(lhs_storage.type, RefType)
+                lhs_deref = lhs_storage.type.to
+                assert isinstance(lhs_deref, ComposedType)
                 # TODO: actually determine slot of rhs
                 # assume for now that it's in declaration order?
                 slot_num = -1
@@ -159,7 +158,7 @@ def compile_expression(expression: Lex,
                                          f"Couldn't find member `{expression.rhs.value}` in type `{lhs_deref.name}`.",
                                          expression.location)
                 write_to_buffer(buffer, OpcodeEnum.PUSH_REF.value, _encode_numeric(slot_num, int_u8))
-                input(f"{next_part_start:#06x}-{buffer.tell():#06x}")
+                # input(f"{next_part_start:#06x}-{buffer.tell():#06x}")
                 yield TempSourceMap(next_part_start, buffer.tell() - next_part_start, expression.rhs.location)
                 # from traceback import format_stack
                 # input(f"Generating TSM {start:#06x}-{buffer.tell()-start:#06x} @ {expression.location}\n\t" +
@@ -174,11 +173,11 @@ def compile_expression(expression: Lex,
             assert expression.rhs is not None
             lhs_storage = yield from compile_expression(expression.lhs, buffer)
             lhs_storage = retrieve(lhs_storage, buffer, expression.lhs.location)
-            if isinstance(lhs_storage.type, REF_TYPE):  # noqa
-                assert isinstance(lhs_storage.type, GenericType)
-                lhs_deref = lhs_storage.type.generic_params['T']  # noqa
+            if isinstance(lhs_storage.type, RefType):  # noqa
+                assert isinstance(lhs_storage.type, RefType)
+                lhs_deref = lhs_storage.type.to
                 # input(lhs_deref)
-                assert not isinstance(lhs_deref, GenericType.GenericParam)
+                assert isinstance(lhs_deref, ComposedType)
                 if lhs_deref.inherits is not None and ARRAY_TYPE in lhs_deref.inherits:
                     rhs_storage = yield from compile_expression(expression.rhs, buffer, want=USIZE_TYPE)
                     rhs_storage = retrieve(rhs_storage, buffer, expression.rhs.location)
@@ -222,7 +221,7 @@ def compile_expression(expression: Lex,
                     case IntegralType(), FloatType() | FloatType(), IntegralType():
                         raise NotImplementedError("Result will be a float...")
                     case FloatType(), FloatType():
-                        bittness = max(lhs_storage.type.size, rhs_storage.type.size)
+                        bittness = max(lhs_storage.type.get_size(), rhs_storage.type.get_size())
                         match bittness:
                             case 2:
                                 r_type, t_type = NumericTypes.f16, F16_TYPE
@@ -243,7 +242,7 @@ def compile_expression(expression: Lex,
                             f"Adding two floats... `{lhs_storage.type.name} + {rhs_storage.type.name} = {t_type.name}`")
                         return StorageDescriptor(Storage.Stack, t_type)
                     case IntType(), IntType():
-                        bittness = max(lhs_storage.type.size, rhs_storage.type.size)
+                        bittness = max(lhs_storage.type.get_size(), rhs_storage.type.get_size())
                         signedness = lhs_storage.type.signed or rhs_storage.type.signed
                         match bittness, signedness:
                             case 8, False:

@@ -1,6 +1,8 @@
 type: type;
 void: type;
 
+int: type;
+uint: type;
 i8: type;
 u8: type;
 i16: type;

@@ -12,10 +12,11 @@ from ..tokenizer import Token, TokenType
 class StaticVariableDecl:
     """Describes the declaration of a variable during static analysis."""
     type: TypeBase
-    lex: Declaration | Identity | TypeDeclaration
+    lex: Declaration | Identity | TypeDeclaration = field(repr=False)
     fqdn: str | None = field(default=None, kw_only=True)
     parent: Self | None = field(default=None, kw_only=True)
     member_decls: dict[str, 'StaticVariableDecl'] = field(default_factory=dict, kw_only=True)
+    const: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
         assert isinstance(self.type, TypeBase)
@@ -40,7 +41,7 @@ class StaticVariableDecl:
         return f"{self.lex.identity.lhs}: {self.type.name}"
 
     def as_const(self) -> Self:
-        return replace(self, type=replace(self.type, const=True))
+        return replace(self, const=True)
 
 
 @dataclass(frozen=True, slots=True)
