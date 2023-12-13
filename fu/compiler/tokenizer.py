@@ -51,6 +51,7 @@ class TokenType(Enum):
     NamespaceKeyword = 'namespace'
     TrueKeyword = 'true'
     FalseKeyword = 'false'
+    StaticKeyword = 'static'
 
     # Char classes
     Operator = '+-*/!'

@@ -1,7 +1,5 @@
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable
-from typing import Literal as Literal_
-from typing import Self, Union
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Iterable, Literal as Literal_, Self, Union
 from logging import getLogger
 
 from .. import TokenStream
@@ -90,12 +88,16 @@ class TypeDeclaration(Lex):
 
 @dataclass(repr=False, slots=True, frozen=True)
 class Declaration(Lex):
-    """Declaration: Identity [ '=' Expression | Scope ];"""
+    """Declaration: [ 'static' ] Identity [ '=' Expression | Scope ];"""
     identity: Identity | SpecialOperatorIdentity
+    modifiers: list[TokenType] = field(default_factory=list)
     initial: Union['Scope', 'Expression', ExpList, None] = None
     is_fat_arrow: bool = False
 
     def to_code(self) -> Iterable[str]:
+        for m in self.modifiers:
+            yield m.value
+            yield ' '
         yield from self.identity.to_code()
         if self.initial is not None:
             yield ' = ' if not self.is_fat_arrow else ' => '
@@ -103,8 +105,11 @@ class Declaration(Lex):
         yield ';'
 
     def __repr__(self) -> str:
+        mods = ' '.join(m.value for m in self.modifiers)
+        if mods:
+            mods += ' '
         after = '' if self.initial is None else f'{"=>" if self.is_fat_arrow else "="}{self.initial!r}'
-        return f"Declaration<{self.identity!r}{after}>"
+        return f"Declaration<{mods}{self.identity!r}{after}>"
 
     def _s_expr(self) -> tuple[str, list[Lex]]:
         ret: list[Lex] = [self.identity]
@@ -120,6 +125,7 @@ class Declaration(Lex):
 
         raw: list[Lex | Token] = []
 
+        modifiers: list[TokenType] = []
         identity: Identity | None
         id_stack: list[Identifier] = []
         # metadata = None
@@ -132,7 +138,15 @@ class Declaration(Lex):
         #     metadata = MetadataList.try_lex(stream)
         #     stream.expect(TokenType.RBracket)
 
+        if (tok := stream.peek()).type in (TokenType.StaticKeyword, ):
+            stream.pop()
+            modifiers.append(tok.type)
+            raw.append(tok)
+            _LOG.debug(f"Got a decl modifier: {tok.value}")
+
         if (identity := Identity.try_lex(stream)) is None:
+            if TokenType.StaticKeyword in modifiers:
+                return None
             # Maybe dotted?
             if (first_id := Identifier.try_lex(stream)) is None:
                 return None
@@ -167,8 +181,11 @@ class Declaration(Lex):
                              location=SourceLocation.from_to(raw[0].location, raw[-1].location))
 
         raw.append(identity)
+        _LOG.debug(f"Got an identity: `{identity.lhs.value}`")
 
         if identity.rhs.ident.value in ('type', 'interface'):
+            if TokenType.StaticKeyword in modifiers:
+                return None
             if len(id_stack) > 1:
                 return None
             if (tok := stream.pop()) is None:
@@ -252,6 +269,7 @@ class Declaration(Lex):
 
         ret = Declaration(raw,
                           identity,
+                          modifiers,
                           initial,
                           is_fat_arrow=is_fat_arrow,
                           location=SourceLocation.from_to(raw[0].location, raw[-1].location))
