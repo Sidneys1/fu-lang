@@ -2,8 +2,11 @@ from contextlib import ExitStack
 from typing import Iterator
 
 # from ...types.composed_types.generic_types.type_ import StaticType
+from ...types.composed_types.static_type import StaticType
+
 from .. import CompilerNotice
-from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, StaticScope, Type_, TypeDeclaration
+from ..lexer import Declaration, Document, ExpList, Identity, Lex, Namespace, Scope, Type_, TypeDeclaration
+
 from . import _LOG
 from .create_new_interface import create_new_interface
 from .create_new_type import create_new_type
@@ -175,6 +178,10 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                 yield ex
                 return
 
+            if isinstance(var_type, StaticType):
+                assert var_type.instance_type is not None
+                var_type = var_type.instance_type
+
             if not element.is_fat_arrow and element.initial is not None and not isinstance(
                     element.initial, (Scope, ExpList)):
                 try:
@@ -196,6 +203,8 @@ def _populate(element: Lex) -> Iterator[CompilerNotice]:
                                      element,
                                      fqdn=(scope.fqdn + '.' + name) if scope.parent is not None else name)
             scope.members[name] = svd
+            if element.initial is None:
+                scope.uninitialized.add(name)
             if scope.this_decl is not None:
                 scope.this_decl.member_decls[name] = svd
                 # scope.this_decl.type.resolved.members[name] = var_type

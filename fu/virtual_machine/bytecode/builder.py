@@ -3,6 +3,7 @@ from typing import Mapping
 from types import EllipsisType
 from contextvars import ContextVar
 from contextlib import contextmanager
+from logging import getLogger
 
 from ...compiler import SourceLocation
 from ...types import VOID_TYPE, TypeBase
@@ -11,6 +12,7 @@ from . import _encode_numeric, _encode_u32, _to_bytecode_numeric, int_u16, int_u
 from .structures import BytecodeBinary, BytecodeFunction, BytecodeType
 
 _BUILDER: ContextVar['BytecodeBuilder'] = ContextVar('_BUILDER')
+_LOG = getLogger(__package__)
 
 
 class BytecodeBuilder:
@@ -73,12 +75,16 @@ class BytecodeBuilder:
     def _add_type(self, type_: BytecodeType) -> int_u16:
         # TODO: recursively check...
         try:
-            return _to_bytecode_numeric(self.__types.index(type_), int_u16)
+            index = self.__types.index(type_)
+            _LOG.debug(f'Adding existing type: {index}')
+            return _to_bytecode_numeric(index, int_u16)
         except ValueError:
             self.__types.append(type_)
+            _LOG.debug(f'Adding new type: {len(self.__types) - 1}')
             return _to_bytecode_numeric(len(self.__types) - 1, int_u16)
 
     def add_type_type(self, type_: TypeBase) -> int_u16:
+        assert isinstance(type_, TypeBase)
         if type_ == VOID_TYPE:
             return self._add_type(BytecodeType(type_=BytecodeType.Type.VOID))
         return self._add_type(BytecodeType.from_type(self, type_))

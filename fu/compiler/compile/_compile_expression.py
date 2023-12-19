@@ -3,8 +3,10 @@ from typing import Generator
 
 from ...types import (TypeBase, IntegralType, IntType, FloatType, EnumType, GenericType, BOOL_TYPE, F16_TYPE, F32_TYPE,
                       F64_TYPE, I16_TYPE, I32_TYPE, I64_TYPE, I8_TYPE, U16_TYPE, U32_TYPE, U64_TYPE, U8_TYPE,
-                      USIZE_TYPE, ARRAY_TYPE, RefType, make_ref, ComposedType)
-from ...virtual_machine.bytecode import NumericTypes, OpcodeEnum, _encode_numeric, int_u64, int_u8, float_f32, int_u32
+                      USIZE_TYPE, ARRAY_TYPE, RefType, make_ref, ComposedType, StaticType)
+from ...virtual_machine.bytecode import (NumericTypes, OpcodeEnum, _encode_numeric, int_u64, int_u8, float_f32, int_u32,
+                                         int_u16)
+from ...virtual_machine.bytecode.builder import BytecodeBuilder
 
 from .. import CompilerNotice
 from ..analyzer.scope import AnalyzerScope, StaticVariableDecl
@@ -70,8 +72,13 @@ def compile_expression(expression: Lex,
             assert expression.rhs is not None
             rhs_storage = yield from compile_expression(expression.rhs, buffer)
             lhs_storage = storage_type_of(expression.lhs.value, expression.lhs.location)
-            assert isinstance(lhs_storage, StaticVariableDecl)
-            convert_to_stack(rhs_storage, lhs_storage.type, buffer, expression.rhs.location)
+            assert isinstance(lhs_storage.type, TypeBase)
+            # assert isinstance(lhs_storage.decl,
+            #                   StaticVariableDecl), f"lhs_storage is unexpectedly a `{type(lhs_storage).__name__}`"
+            lhs_type = lhs_storage.type
+            if isinstance(lhs_type, ComposedType):
+                lhs_type = make_ref(lhs_type)
+            convert_to_stack(rhs_storage, lhs_type, buffer, expression.rhs.location)
             match lhs_storage.storage:
                 case Storage.Locals:
                     if lhs_storage.slot is None:
@@ -79,9 +86,9 @@ def compile_expression(expression: Lex,
                         assert fn_scope is not None
                         write_to_buffer(buffer, OpcodeEnum.INIT_LOCAL)
                         slot = len(fn_scope.locals)
-                        fn_scope.locals[expression.lhs.value] = lhs_storage.type
+                        fn_scope.locals[expression.lhs.value] = lhs_type
                         yield TempSourceMap(start, buffer.tell() - start, expression.location)
-                        return StorageDescriptor(Storage.Locals, lhs_storage.type, slot)
+                        return StorageDescriptor(Storage.Locals, lhs_type, slot=slot)
                     else:
                         write_to_buffer(buffer, OpcodeEnum.POP_LOCAL, _encode_numeric(lhs_storage.slot, int_u8))
                         yield TempSourceMap(start, buffer.tell() - start, expression.location)
@@ -122,13 +129,24 @@ def compile_expression(expression: Lex,
                 raise CompilerNotice('Error', f"Couldn't resolve `{expression.lhs.value}` in {scope.fqdn}.",
                                      expression.location)
             if lhs_storage.storage == Storage.Static:
-                # This is some sort of type or scope
                 if isinstance(lhs_storage.type, AnalyzerScope):
                     member = lhs_storage.type.members[expression.rhs.value]
                     if isinstance(member, AnalyzerScope):
                         return StorageDescriptor(Storage.Static, member)
                     return StorageDescriptor(Storage.Static, member.type, decl=member)
-                raise NotImplementedError()
+                if isinstance(lhs_storage.type, StaticType):
+                    member_type = lhs_storage.type.static_members[expression.rhs.value]
+                    assert lhs_storage.decl is not None
+                    member = lhs_storage.decl.member_decls[expression.rhs.value]
+                    slot = -1
+                    for s, name in enumerate(lhs_storage.type.static_members):
+                        if name == expression.rhs.value:
+                            slot = s
+                            break
+                    if slot == -1:
+                        raise NotImplementedError()
+                    return StorageDescriptor(Storage.Static, member_type, decl=member, slot=slot)
+                raise NotImplementedError(f"lhs_storage.type is unexpectedly a `{type(lhs_storage.type).__name__}`")
 
             # Get left side somewhere we can access it
             lhs_storage = retrieve(lhs_storage, buffer, expression.lhs.location)
@@ -282,8 +300,12 @@ def compile_expression(expression: Lex,
             else:
                 raise NotImplementedError(f"Don't support infix Operator {expression.oper.value!r}")
         case Identifier():
+            print(f'compile_expression({expression=})')
             name = expression.value
             storage_type = storage_type_of(name, expression.location)
+            # input(
+            #     f'\tstorage_type_of({name=}) = StorageType({storage_type.storage}, {storage_type.type.name}, slot={storage_type.slot})'
+            # )
             assert storage_type is not None
             return storage_type
         case Operator(oper=Token(type=TokenType.LParen)):
@@ -292,22 +314,34 @@ def compile_expression(expression: Lex,
             lhs = yield from compile_expression(expression.lhs, buffer)
             if lhs.storage == Storage.Static:
                 # foo
-                if lhs.decl is not None:
-                    func_decl = lhs.decl
-                    assert func_decl.type.callable is not None
-                    params, ret_type = func_decl.type.callable
-                    func = DependantFunction(buffer, func_decl)
-                    # TODO: push params
-                    if params != ():
-                        assert isinstance(expression.rhs, ExpList)
-                        assert len(expression.rhs.values) == len(params)
-                        for param_type, expr in zip(params, expression.rhs.values):
-                            ex_storage = yield from compile_expression(expr, buffer, want=param_type)
-                            convert_to_stack(ex_storage, param_type, buffer, expr.location)
-                        write_to_buffer(buffer, OpcodeEnum.INIT_ARGS, _encode_numeric(len(params), int_u8))
-                    write_to_buffer(buffer, OpcodeEnum.CALL_EXPORT, func.id())
-                    return StorageDescriptor(Storage.Stack, ret_type)
-                raise NotImplementedError(f"static {lhs.type.name}?")
+                if lhs.decl is None:
+                    raise NotImplementedError("???")
+                func_decl = lhs.decl
+                assert func_decl.type.callable is not None
+                if isinstance(func_decl.type, StaticType):
+                    # ctor
+                    # input('ctor')
+                    # TODO: emit new_object bytecode
+                    # TODO: get type id
+                    builder = BytecodeBuilder.current()
+                    assert func_decl.type.instance_type is not None
+                    type_id = builder.add_type_type(func_decl.type.instance_type)
+                    write_to_buffer(buffer, OpcodeEnum.NEW, _encode_numeric(type_id, int_u16))
+                    # TODO: dependant on ctor function (if it exists)
+                    return StorageDescriptor(Storage.Stack, make_ref(func_decl.type.instance_type))
+                # Some other static function/callable
+                params, ret_type = func_decl.type.callable
+                func = DependantFunction(buffer, func_decl)
+                # TODO: push params
+                if params != ():
+                    assert isinstance(expression.rhs, ExpList)
+                    assert len(expression.rhs.values) == len(params)
+                    for param_type, expr in zip(params, expression.rhs.values):
+                        ex_storage = yield from compile_expression(expr, buffer, want=param_type)
+                        convert_to_stack(ex_storage, param_type, buffer, expr.location)
+                    write_to_buffer(buffer, OpcodeEnum.INIT_ARGS, _encode_numeric(len(params), int_u8))
+                write_to_buffer(buffer, OpcodeEnum.CALL_EXPORT, func.id())
+                return StorageDescriptor(Storage.Stack, ret_type)
             if lhs.decl is not None:
                 raise NotImplementedError("non-static svd?")
             raise NotImplementedError("Literally don't even know how we got here.")

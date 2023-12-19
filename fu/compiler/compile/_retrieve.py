@@ -26,4 +26,5 @@ def retrieve(from_: StorageDescriptor, buffer: BytesIO, loc: SourceLocation) -> 
             # The thing we're trying to retrieve is in the current method's locals.
             write_to_buffer(buffer, OpcodeEnum.PUSH_LOCAL, _encode_numeric(from_.slot, int_u8))
             return StorageDescriptor(Storage.Stack, from_.type)
-    raise CompilerNotice('Critical', f"Don't know how to get {from_.type.name} out of {from_.storage.name}", loc)
+    raise CompilerNotice('Critical',
+                         f"Don't know how to get {from_.type.name} out of {from_.storage.name} ({from_.slot=})", loc)

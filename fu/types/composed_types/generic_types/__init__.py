@@ -5,7 +5,7 @@ from typing import Self, Union, ClassVar, cast, Literal
 from ....compiler import CompilerNotice, SourceLocation
 from ....compiler.tokenizer import SpecialOperatorType
 from ... import TypeBase
-from .. import ComposedType, ThisType, CallSignature
+from .. import ComposedType, ThisType, CallSignature, StaticType
 
 _LOG = getLogger(__package__)
 
@@ -45,6 +45,7 @@ def _rebuild_generic_type(t: 'GenericType',
     still_generics = {k: v for k, v in all_generics.items() if isinstance(v, GenericType.GenericParam)}
     # from ... import ThisType
     new_this = ThisType()
+    new_static = StaticType()
 
     updated_generics: dict[str, TypeBase] = {}
     """Generics (resolved or not) being replaced *this round*."""
@@ -197,7 +198,9 @@ def _rebuild_generic_type(t: 'GenericType',
         readonly=t.readonly,
         special_operators=special_operators,
         generic_params=all_params,
-        generic_inheritance=tuple(generic_inheritance))
+        generic_inheritance=tuple(generic_inheritance),
+        static_type=new_static,
+        this_type=new_this)
 
     # from .type_ import StaticType
     # if isinstance(t, StaticType):
@@ -216,6 +219,7 @@ def _rebuild_generic_type(t: 'GenericType',
     ret = type(t)(**kwargs)
     _LOG.debug('2')
     new_this.resolve(ret)
+    new_static.resolve(ret, ret.static_members)
     mode = f'still-generic-on-`{"`-`".join(still_generics)}`' if still_generics else 'fully-resolved'
     nf = '`, `'.join(f'{k}->{v.name}' for k, v in new.items())
     _LOG.debug(f"Resolution of `{nf}` for {t.name} produced {mode} `{ret.name}`.")

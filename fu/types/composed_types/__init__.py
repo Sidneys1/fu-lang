@@ -3,12 +3,16 @@ Composed (class) types.
 """
 
 from dataclasses import dataclass, field
-from typing import TypeAlias, Literal, Optional
+from typing import TypeAlias, Literal, Optional, TYPE_CHECKING
 from collections import OrderedDict
 from functools import partial
 
 from ...compiler.tokenizer import SpecialOperatorType
+
 from .. import TypeBase
+
+if TYPE_CHECKING:
+    from .static_type import StaticType
 
 CallSignature: TypeAlias = tuple[tuple['TypeBase', ...], 'TypeBase']
 """A tuple representing the argument list (`[0]`) and return type (`[1]`) of a callable."""
@@ -39,7 +43,7 @@ class ComposedType(TypeBase):  # type: ignore[misc]
     # reference_type: bool = field(default=True)
     # """Whether or not instances of this type is passed by ref (True) or value (False)."""
 
-    _instance_cache: Optional['ComposedType'] = None
+    # _instance_cache: Optional['ComposedType'] = None
 
     def get_size(self) -> int:
         total = 0
@@ -73,12 +77,12 @@ class ComposedType(TypeBase):  # type: ignore[misc]
                 total += size - rem
         return total
 
-    @property
-    def instance_type(self) -> 'ComposedType':
-        if self._instance_cache is not None:
-            return self._instance_cache
-        # TODO: Populate instance cache
-        return None
+    # @property
+    # def instance_type(self) -> 'ComposedType':
+    #     if self._instance_cache is not None:
+    #         return self._instance_cache
+    #     # TODO: Populate instance cache
+    #     return None
 
     inherits: tuple['TypeBase', ...] | None = None
     """Inheritance chain."""
@@ -105,7 +109,10 @@ class ComposedType(TypeBase):  # type: ignore[misc]
     inherited_members: set[str] = field(default_factory=set)
     """Members that have come from parent classes."""
 
-    this_type: ThisType = field(init=False, default_factory=ThisType)
+    this_type: ThisType
+    static_type: 'StaticType'
 
 
-__all__ = ('ComposedType', 'ThisType')
+from .static_type import StaticType
+
+__all__ = ('ComposedType', 'ThisType', 'StaticType')

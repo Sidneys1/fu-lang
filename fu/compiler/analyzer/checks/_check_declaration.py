@@ -3,6 +3,7 @@ from logging import getLogger
 
 from ....types import ThisType, ComposedType
 from ... import CompilerNotice
+from ...tokenizer import TokenType
 from ...lexer import (Declaration, Identity, ParamList, Scope, Type_, Expression, Operator, Atom, LexedLiteral,
                       Identifier)
 from .. import _mark_checked_recursive
@@ -14,9 +15,15 @@ from ..static_variable_decl import StaticVariableDecl
 _LOG = getLogger(__package__)
 
 
-def _check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
+def check_declaration(element: Declaration) -> Iterator[CompilerNotice]:
     from . import _check
     scope = AnalyzerScope.current()
+
+    # Check allowed modifiers
+    for m in element.modifiers:
+        if m.type == TokenType.StaticKeyword and scope.type == AnalyzerScope.Type.Namespace:
+            yield CompilerNotice('Error', "`static` modifier is only allowed within types.", m.location)
+
     # Check shadowing
     if scope.parent is not None and (outer_decl := scope.parent.in_scope(element.identity.lhs.value)) is not None:
         _LOG.debug(f"`{element.identity.lhs.value}` already defined in `{scope.parent.fqdn}` (checking {scope.fqdn})")

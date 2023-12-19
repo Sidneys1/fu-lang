@@ -24,7 +24,7 @@ class DependantFunction(Dependency):
     def __post_init__(self) -> None:
         fqdn = self.decl.fqdn
         builder = BytecodeBuilder.current()
-        assert fqdn is not None and builder is not None
+        assert fqdn is not None and builder is not None, f"Expected {fqdn=} to not be None and {builder=} to not be None ({self.decl=})"
         self.fqdn_id = builder.add_string(fqdn)
         value = builder.function_map.get(self.fqdn_id, None)
         if value is None:

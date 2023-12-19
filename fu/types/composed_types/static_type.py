@@ -1,18 +1,57 @@
 """Static types and the `Type` type."""
 
 from dataclasses import dataclass, field, InitVar
-from typing import ClassVar
+from typing import Optional
 from collections import OrderedDict
 from functools import partial
 
-from ....compiler.tokenizer import SpecialOperatorType
-from ... import TypeBase
-from . import ComposedType, ThisType, GenericType, CallSignature
+from ...compiler.tokenizer import SpecialOperatorType
+from .. import TypeBase
+from . import ComposedType, CallSignature
 
 # def _type_generics():
 #     return {'T': StaticType.TYPE_T}
 
 TYPE_TYPE = TypeBase('type', is_builtin=True)
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class StaticType(TypeBase):
+    """Describes the static storage of a class (vs an instance of one)."""
+
+    instance_type: ComposedType | None = field(init=False, default=None)
+    name: str = field(init=False, default='static<???>')
+    static_members: OrderedDict[str, TypeBase] = field(init=False, default_factory=OrderedDict)
+    callable: CallSignature | None = field(init=False, default=None)
+    _resolved: bool = field(init=False, default=False)
+    is_builtin: bool = field(init=False, default=False)
+
+    def resolve(self,
+                resolved: Optional['ComposedType'],
+                static_members: OrderedDict[str, TypeBase],
+                name: str | None = None):
+        if self._resolved:
+            raise ValueError("Already resolved.")
+
+        _set = partial(object.__setattr__, self)
+        _set('_resolved', True)
+
+        _set('static_members', static_members)
+
+        if resolved is None:
+            assert name is not None
+            _set('name', f"static<{name}>")
+            return
+
+        _set('instance_type', resolved)
+        assert self.instance_type is not None
+        _set('name', f"static<{self.instance_type.name if self.instance_type is not None else self.name}>")
+
+        if self.instance_type is not None:
+            # get constructor
+            _set('callable',
+                 self.instance_type.special_operators.get(SpecialOperatorType.Constructor, ((), self.instance_type)))
+
 
 # @dataclass(frozen=True, kw_only=True, slots=True)
 # class StaticType(GenericType):  # type: ignore[misc]

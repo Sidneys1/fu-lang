@@ -30,6 +30,17 @@ class StaticVariableDecl:
         return self.lex.location
 
     @property
+    def variable_name(self) -> str:
+        if isinstance(self.lex, TypeDeclaration):
+            return self.lex.name.value
+        if isinstance(self.lex, Identity):
+            return self.lex.lhs.value
+        if isinstance(self.lex, Identifier):
+            return self.lex.value
+        assert isinstance(self.lex, Declaration), f"Expected Declaration, got `{type(self.lex).__name__}`"
+        return self.lex.identity.lhs.value
+
+    @property
     def name(self) -> str:
         if isinstance(self.lex, TypeDeclaration):
             return f"{self.lex.name.value}: {self.lex.type}"

@@ -73,7 +73,7 @@ from .composed_types import *
 
 from .composed_types.generic_types import *
 from .composed_types.generic_types.array import ARRAY_TYPE
-from .composed_types.generic_types.type_ import *
+from .composed_types.static_type import *
 
 
 @dataclass(frozen=True, slots=True)

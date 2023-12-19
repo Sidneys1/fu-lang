@@ -9,7 +9,7 @@ from ..resolvers import resolve_owning_type, resolve_type
 from ..scope import AnalyzerScope
 from ..static_variable_decl import OverloadedMethodDecl, StaticVariableDecl
 from ._check_conversion import _check_conversion
-from ._check_declaration import _check_declaration
+from ._check_declaration import check_declaration
 from ._check_interface_declaration import _check_interface_declaration
 from ._check_type_alias import _check_type_alias
 from ._check_type_declaration import check_type_declaration
@@ -61,7 +61,7 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
         case Identifier():
             return
         case Declaration():
-            yield from _check_declaration(element)
+            yield from check_declaration(element)
         case TypeDeclaration(type='type', definition=list()):
             try:
                 if element.name.value not in scope.scopes:
@@ -186,26 +186,32 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
         case Operator(oper=Token(type=TokenType.Dot)) if element.lhs is not None:
             yield from _check(element.lhs)
             if not isinstance(element.rhs, Identifier):
-                yield CompilerNotice('Error',
-                                     "The dot operator must have an identifier on the right hand side.",
-                                     location=element.rhs.location)
+                yield CompilerNotice('Error', "The dot operator must have an identifier on the right hand side.",
+                                     element.rhs.location)
                 return
             lhs_type = resolve_type(element.lhs)
             if isinstance(lhs_type, AnalyzerScope):
                 if element.rhs.value not in lhs_type.members:
                     yield CompilerNotice('Error',
-                                         f"Scope `{lhs_type.name}` does not have a `{element.rhs.value}` member.")
+                                         f"Scope `{lhs_type.name}` does not have a `{element.rhs.value}` member.",
+                                         element.location)
                 return
             lhs_decl = None
             if isinstance(lhs_type, StaticVariableDecl):
                 lhs_decl = lhs_type
                 lhs_type = lhs_type.type
-            # TODO: check if this is a Type (instance) or a TypeType (static).
-            if element.rhs.value not in lhs_type.instance_members:
-                # input(f"\n\n\n{lhs_type.name}.{element.rhs.value} not in {lhs_decl.member_decls}")
-                yield CompilerNotice('Error',
-                                     f"`{lhs_type.name}` does not have a `{element.rhs.value}` member.",
-                                     location=element.location)
+            if not isinstance(lhs_type, (ComposedType, StaticType)):
+                yield CompilerNotice('Error', 'Intrinsic types do not have members.', element.location)
+            else:
+                pool: list[str]
+                pool = list(lhs_type.static_members)
+                if isinstance(lhs_type, ComposedType):
+                    pool.extend(lhs_type.instance_members.keys())
+
+                if element.rhs.value not in pool:
+                    # input(f"\n\n\n{lhs_type.name}.{element.rhs.value} not in {lhs_decl.member_decls}")
+                    yield CompilerNotice('Error', f"`{lhs_type.name}` does not have a `{element.rhs.value}` member.",
+                                         element.location)
             _mark_checked_recursive(element.rhs)
         case Operator(oper=Token(type=TokenType.Dot)) if element.lhs is None:
             if not isinstance(element.rhs, Identifier):
@@ -347,7 +353,8 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
                 return
             if lhs_member_decl.const:
                 yield CompilerNotice('Error', "Cannot assign to a const variable.", element.location)
-            if isinstance(rhs_type, StaticScope):
+
+            if isinstance(rhs_type, AnalyzerScope):
                 yield CompilerNotice('Error', f"Cannot assign a Scope to a `{lhs_member_decl.type.name}`.",
                                      element.location)
                 return
@@ -357,15 +364,44 @@ def _check(element: Lex) -> Iterator[CompilerNotice]:
             allowed = yield from _check_conversion(rhs_type, lhs_member_decl.type, element.location)
             if not allowed:
                 return
+            # input(lhs_member_decl.variable_name)
+            if (name := lhs_member_decl.variable_name) in scope.uninitialized:
+                scope.uninitialized.remove(name)
         case Namespace():
             with ExitStack() as ex:
                 for ident in element.name:
                     name = ident.value
                     ex.enter_context(AnalyzerScope.enter(name))
                 for decl in element.static_scope:
+                    if isinstance(decl, Declaration) \
+                            and decl.identity is not None \
+                            and (isinstance(decl.identity, SpecialOperatorIdentity) \
+                                    or (isinstance(decl.identity, Identity) \
+                                        and (not decl.identity.rhs.mods \
+                                            or not isinstance(decl.identity.rhs.mods[-1], ParamList)))):
+                        yield CompilerNotice('Error',
+                                             'Variable declarations are not allowed outside of types or functions.',
+                                             decl.location)
                     yield from _check(decl)
         case Document():
             for decl in element.content:
+                # if isinstance(decl, Declaration):
+                #     input(f"{decl!r}: \n\
+                #             {decl.identity is not None=} \n\
+                #             and ({isinstance(decl.identity, SpecialOperatorIdentity)=} \n\
+                #                     or ({isinstance(decl.identity, Identity)=} \n\
+                #                         and ({not decl.identity.rhs.mods or not isinstance(decl.identity.rhs.mods[-1], ParamList)=}))) \n\
+                #             and {decl.initial is not None=} \n\
+                #             and {isinstance(decl.initial, Scope)=}")
+                if isinstance(decl, Declaration) \
+                        and decl.identity is not None \
+                        and (isinstance(decl.identity, SpecialOperatorIdentity) \
+                                or (isinstance(decl.identity, Identity) \
+                                    and (not decl.identity.rhs.mods \
+                                         or not isinstance(decl.identity.rhs.mods[-1], ParamList)))):
+                    yield CompilerNotice('Error',
+                                         'Variable declarations are not allowed outside of types or functions.',
+                                         decl.location)
                 yield from _check(decl)
         case Scope():
             first_return = None

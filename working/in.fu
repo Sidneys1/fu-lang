@@ -1,14 +1,12 @@
-/* foo: type = {
-  static a: int;
-  static b: int;
-  static bar: void() = {  };
-
-  x: int;
-
-  op=: this(this, x: int) = {
-    .x = x;
+Foo: type = {
+  x: int = 0;
+  static y: int = 0;
+  static bla: int() = {
+    f: Foo;
+    f = Foo();
+    f.x;
+    return Foo.y;
   };
 };
-*/
 
-static x: int;
+main: int() => Foo.bla();

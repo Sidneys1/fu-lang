@@ -5,4 +5,4 @@ htmlcov/
 pytest.html
 .pytest_cache/
 .coverage
-a.out
+*.out

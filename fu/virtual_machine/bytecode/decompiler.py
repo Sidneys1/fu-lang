@@ -36,13 +36,21 @@ def _get_function_id(fn_id: int_u16, binary: BytecodeBinary) -> str:
     return scope + '.' + name
 
 
+def _get_type_id(type_id: int_u16, binary: BytecodeBinary) -> str:
+    # print(f'getting type of id {type_id} (there are {len(binary.types):,})')
+    type = binary.types[type_id]
+    with BytesIO(binary.strings) as stream:
+        name = _get_string(type.name, stream)
+    return name
+
+
 def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_function: bool = False) -> Iterator[str]:
     if single_function and binary is None:
         raise ValueError("Cannot print single function if binary is not provided")
 
     functions: dict[int, tuple[str, str]] = {}
-    longest_path = max(len(str(x))
-                       for x in binary.source_map) if binary is not None and binary.source_map is not None else 0
+    longest_path = max(
+        len(str(x)) for x in binary.source_map.values()) if binary is not None and binary.source_map is not None else 0
 
     if binary:
         for func in binary.functions:
@@ -60,13 +68,14 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_func
                 break
             if binary is not None:
                 args = tuple(
-                    _get_function_id(a, binary) if p == ParamType.FunctionId else a
-                    for p, a in zip(opcode.params, args))
+                    _get_function_id(a, binary) if p == ParamType.FunctionId else \
+                        (_get_type_id(a, binary) if p == ParamType.TypeId else a) \
+                        for p, a in zip(opcode.params, args))
             if last_opcode == OpcodeEnum.RET and pos in functions:
                 if single_function:
                     return
                 fqdn, sig = functions[pos]
-                yield f"       {FAINT}│                               │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {sig} = {{ /* ... */ }}{RESET}"
+                yield f"{FAINT}{' '*longest_path} │         │                               │ {RESET + FUNC_NAME}{fqdn + ':':<17}   {COMMENT}; {sig} = {{ /* ... */ }}{RESET}"
 
             asm, explain = opcode.as_asm(*args)
             padding = ''
@@ -107,7 +116,7 @@ def decompile(bytecode: bytes, binary: BytecodeBinary | None = None, single_func
                     hex_bytes += ' ' + CONSTANT + b
             hex_bytes += RESET
 
-            range_: str = ''
+            range_: str = (' ' * longest_path) + ' │ '
             end = stream.tell()
             if binary is not None and binary.source_map is not None:
                 best: tuple[SourceLocation, tuple[int_u32, int_u32]] | None = None

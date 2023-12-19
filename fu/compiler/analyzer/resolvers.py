@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Callable
 
-from ...types import SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, BOOL_TYPE, FloatType, IntType, TypeBase, ThisType
+from ...types import (SIZE_TYPE, STR_TYPE, USIZE_TYPE, VOID_TYPE, F32_TYPE, BOOL_TYPE, FloatType, IntType, TypeBase,
+                      ThisType, StaticType, ComposedType)
 from ...types.integral_types import IntegralType
 from .. import CompilerNotice
 from ..lexer import ExpList, Identifier, Lex, Operator, ReturnStatement, StaticScope, Token, TokenType, Type_
@@ -68,7 +69,13 @@ def resolve_type(element: Lex,
                 lhs_decl = lhs_type
                 lhs_type = lhs_type.type
             assert isinstance(element.rhs, Identifier)
-            ret = lhs_type.instance_members.get(element.rhs.value, None)
+            if isinstance(lhs_type, StaticType):
+                ret = lhs_type.static_members.get(element.rhs.value, None)
+            else:
+                assert isinstance(lhs_type, ComposedType)
+                ret = lhs_type.instance_members.get(element.rhs.value, None) or lhs_type.static_members.get(
+                    element.rhs.value, None)
+
             if ret is None:
                 raise CompilerNotice('Error',
                                      f"Type `{lhs_type.name}` has no member `{element.rhs.value}`.",
@@ -182,6 +189,8 @@ def resolve_type(element: Lex,
                 raise CompilerNotice('Error',
                                      f"Identifier `{element.value}` is not defined.",
                                      location=element.location)
+            if element.value in scope.uninitialized:
+                raise CompilerNotice('Error', f"`{ret.name}` is uninitialized.", element.location)
             return ret
         case Operator():
             raise CompilerNotice('Note', f"Type resolution for Operator `{element.oper}` is not implemented!",

@@ -27,6 +27,7 @@ class AnalyzerScope:
     name: str | None = field(kw_only=False)
     type: Type = field(kw_only=False)
     members: dict[str, Union[StaticVariableDecl, 'AnalyzerScope']] = field(default_factory=dict)
+    uninitialized: set[str] = field(init=False, default_factory=set)
     scopes: dict[str, 'AnalyzerScope'] = field(init=False, default_factory=dict)
     parent: Self | None = field(default=None, repr=False)
     location: SourceLocation | None = field(default=None)
@@ -44,7 +45,7 @@ class AnalyzerScope:
     @classmethod
     def new_global_scope(cls) -> 'AnalyzerScope':
         assert _CURRENT_ANALYZER_SCOPE.get(None) is None
-        ret = cls(None, AnalyzerScope.Type.Anonymous)
+        ret = cls(None, AnalyzerScope.Type.Namespace)
         return ret
 
     @classmethod
@@ -116,13 +117,13 @@ class AnalyzerScope:
         return r or '<GLOBAL SCOPE>'
 
     def in_scope(self, identifier: str) -> Union['AnalyzerScope', StaticVariableDecl, None]:
-        _LOG.debug(f'Searching for {identifier!r} in {self.fqdn}')
+        # _LOG.debug(f'Searching for {identifier!r} in {self.fqdn}')
         s: AnalyzerScope | None = self
         while s is not None:
-            _LOG.debug(f'Searching for {identifier!r} in {self.fqdn} among {set(s.members.keys())}')
+            # _LOG.debug(f'Searching for {identifier!r} in {self.fqdn} among {set(s.members.keys())}')
             if identifier in s.members:
                 ret = s.members[identifier]
-                _LOG.debug(f'\tFound {ret.name}')
+                # _LOG.debug(f'\tFound {ret.name}')
                 return ret
             s = s.parent
         return None

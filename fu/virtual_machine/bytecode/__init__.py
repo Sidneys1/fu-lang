@@ -217,6 +217,7 @@ class ParamType(Enum):
     # NearBase = auto(), 1, int
     NumericType = auto(), 1, NumericTypes
     FunctionId = auto(), 2, _decode_u16
+    TypeId = auto(), 2, _decode_u16
     # u8 = auto(), 1, int
     # u16 = auto(), 2, _decode_u16
     # u32 = auto(), 4, _decode_u32
@@ -341,6 +342,10 @@ class OpcodeEnum(Enum):
     ), 'idiv.{0.name}', 'pop two, integer divide into `{0.name}` (checked), push', ParamType.NumericType
     CHECKED_FDIV = auto(
     ), 'fdiv.{0.name}', 'pop two, float divide into `{0.name}` (checked), push', ParamType.NumericType
+
+    # Objects
+    NEW = auto(), 'new {0}', ('Allocate a new heap object of type {0},'
+                              ' construct it, and push the ref on to the stack'), ParamType.TypeId
 
 
 _FRIENDLY_OPCODE_NAMES: dict[OpcodeEnum, str] = {}

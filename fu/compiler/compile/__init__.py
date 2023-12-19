@@ -2,7 +2,7 @@ from logging import getLogger
 from typing import Generator, Iterable, Iterator
 from io import SEEK_CUR
 
-from ...types import (STR_ARRAY_TYPE, VOID_TYPE, TypeBase, ComposedType, make_ref)
+from ...types import (STR_ARRAY_TYPE, VOID_TYPE, TypeBase, ComposedType, make_ref, StaticType)
 from ...types.integral_types import *
 from ...virtual_machine.bytecode import (OpcodeEnum, _encode_u16)
 from ...virtual_machine.bytecode.builder import BytecodeBuilder
@@ -25,6 +25,9 @@ from ._convert_to_stack import convert_to_stack
 
 _LOG = getLogger(__package__)
 
+ALLOWED_MAIN_RETURN_TYPES = (VOID_TYPE, U8_TYPE, I8_TYPE, U16_TYPE, I16_TYPE, U32_TYPE, I32_TYPE, U64_TYPE, I64_TYPE,
+                             INT_TYPE, UINT_TYPE)
+
 
 def compile_binary() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
     _LOG.debug('\n\n\033#3STARTED COMPILING\n\033#4STARTED COMPILING\n\n')
@@ -46,10 +49,11 @@ def compile_binary() -> Generator[CompilerNotice, None, BytecodeBinary | None]:
         return None
 
     params, return_type = main.type.callable
-    if return_type not in (VOID_TYPE, U8_TYPE, I8_TYPE, U16_TYPE, I16_TYPE, U32_TYPE, I32_TYPE, U64_TYPE, I64_TYPE):
+    if return_type not in ALLOWED_MAIN_RETURN_TYPES:
         assert isinstance(main.lex, Declaration)
-        yield CompilerNotice('Error', "Main does not return an `i8`/`u8`/`void`, "
-                             f"instead: `{return_type.name}`", main.lex.identity.rhs.ident.location)
+        yield CompilerNotice(
+            'Error', f"Main does not return an allowed type (`{return_type.name}` not in set: {{"
+            f"`{'`, `'.join(t.name for t in ALLOWED_MAIN_RETURN_TYPES)}`}}), ", main.lex.identity.rhs.ident.location)
         return None
     if params != ():
         with global_scope.enter('main'):
@@ -219,6 +223,9 @@ def compile_func(func_id: int_u16, func: StaticVariableDecl) -> BytecodeFunction
                 continue
             if isinstance(decl_type, StaticVariableDecl):
                 decl_type = decl_type.type
+            if isinstance(decl_type, StaticType):
+                assert decl_type.instance_type is not None
+                decl_type = decl_type.instance_type
             decls[x.identity.lhs.value] = decl_type
             i += 1
 

@@ -1,7 +1,8 @@
 from logging import getLogger
 from typing import Iterator
+from collections import OrderedDict
 
-from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, InterfaceType, RefType  #, StaticType
+from ...types import ComposedType, GenericType, IntegralType, ThisType, TypeBase, InterfaceType, RefType, StaticType  #, StaticType
 from .. import CompilerNotice
 from ..analyzer.resolvers import resolve_type
 from ..analyzer.scope import AnalyzerScope
@@ -21,8 +22,10 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
     _LOG.debug(f"Creating new type `{decl.name.value}{extra}`.")
     assert not (decl.definition is None or isinstance(decl.definition, Type_))
     this = ThisType()
+    static = StaticType()
+
     this_decl = StaticVariableDecl(this, decl)
-    scope_members: dict[str, StaticVariableDecl] = {}
+    scope_members: dict[str, StaticVariableDecl | AnalyzerScope] = {}
     generic_params: dict[str, GenericType.GenericParam] = {}
 
     if decl.generic_params is not None and len(set(x.value for x in decl.generic_params.params)) != len(
@@ -38,7 +41,8 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
         generic_params[x.value] = g
         scope_members[x.value] = StaticVariableDecl(g, x)
 
-    members: dict[str, StaticVariableDecl] = {}
+    members: OrderedDict[str, StaticVariableDecl] = OrderedDict()
+    static_members: OrderedDict[str, StaticVariableDecl] = OrderedDict()
 
     with AnalyzerScope.new(decl.name.value, AnalyzerScope.Type.Type, vars=scope_members, this_decl=this_decl) as scope:
         inherits: list[TypeBase] = []
@@ -196,7 +200,10 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                                              element,
                                              fqdn=(scope.fqdn + '.' + name) if scope.parent is not None else name)
                     scope.members[name] = svd
-                    members[name] = svd
+                    if any(m.type == TokenType.StaticKeyword for m in element.modifiers):
+                        static_members[name] = svd
+                    else:
+                        members[name] = svd
                     if scope.this_decl is not None:
                         scope.this_decl.member_decls[name] = svd
                 case TypeDeclaration():
@@ -226,32 +233,40 @@ def create_new_type(decl: TypeDeclaration, outer_scope: AnalyzerScope) -> Iterat
                 # size=None,
                 #    reference_type=True,
                 inherits=inherits,
-                instance_members={
+                instance_members=OrderedDict({
                     k: v.type
                     for k, v in members.items()
-                },
+                }),
                 special_operators=special_operators,
-                generic_params=generic_params)
+                generic_params=generic_params,
+                static_type=static,
+                this_type=this)
         else:
             new_type = ComposedType(
                 decl.name.value,
                 # size=None,
                 # reference_type=True,
                 inherits=inherits,
-                instance_members={
+                instance_members=OrderedDict({
                     k: v.type
                     for k, v in members.items()
-                },
-                special_operators=special_operators)
+                }),
+                special_operators=special_operators,
+                static_type=static,
+                this_type=this)
         # input(f"Resolving this of {new_type.name}")
         this.resolve(new_type)
 
         _debug_type(new_type)
 
-        # input(new_type)
-        outer_scope.members[decl.name.value] = StaticVariableDecl(new_type,
+        static.resolve(new_type, OrderedDict({k: v.type for k, v in static_members.items()}), decl.name.value)
+
+        outer_scope.members[decl.name.value] = StaticVariableDecl(static,
                                                                   decl,
-                                                                  member_decls={**this_decl.member_decls})
+                                                                  member_decls={
+                                                                      **members,
+                                                                      **static_members
+                                                                  })
 
 
 def _debug_type(new_type: GenericType | ComposedType) -> None:

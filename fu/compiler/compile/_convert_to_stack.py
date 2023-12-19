@@ -28,6 +28,10 @@ def convert_to_stack(from_: StorageDescriptor,
                 assert from_.slot is not None
                 write_to_buffer(buffer, OpcodeEnum.PUSH_ARG, _encode_numeric(from_.slot, int_u8))
                 return
+            case Storage.Static:
+                assert from_.slot is not None
+                # TODO: write PUSH_STATIC opcode
+                return
             case _:
                 raise NotImplementedError(f"Don't know how to move a {from_.storage} onto the stack.")
     match from_.type, to_:

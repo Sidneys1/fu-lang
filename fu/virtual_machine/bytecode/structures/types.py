@@ -30,6 +30,7 @@ class BytecodeType(BytecodeBase):
 
     @classmethod
     def from_type(cls, builder: 'BytecodeBuilder', underlying: TypeBase) -> 'BytecodeType':
+        _LOG.debug(f'Creating a BytecodeType from a Type: `{underlying.name}`')
         name = builder.add_string(underlying.name)
         callable_: None | tuple[tuple[int_u16, ...], int_u16] = None
         if (underlying_callable := getattr(underlying, 'callable', None)) is not None:

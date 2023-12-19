@@ -1,6 +1,6 @@
 from logging import getLogger
 
-from ...types import TypeBase, ComposedType, GenericType, ARRAY_TYPE  #, StaticType
+from ...types import TypeBase, ComposedType, GenericType, ARRAY_TYPE, ThisType, StaticType  #, StaticType
 
 from .. import CompilerNotice
 from ..lexer import ArrayDef, GenericParamList, Identity, ParamList, Type_
@@ -44,7 +44,11 @@ def _with_modifiers(t: TypeBase, mods: list[ParamList | ArrayDef | GenericParamL
                     type_from_lex(x.rhs if isinstance(x, Identity) else x, scope) for x in mod.params
                     if isinstance(x, Type_) or x.rhs != 'namespace')
                 add = '(' + ', '.join(x.name for x in params) + ')'
-                ret = ComposedType(ret.name + add, callable=(params, t))
+                new_this = ThisType()
+                new_static = StaticType()
+                ret = ComposedType(ret.name + add, callable=(params, t), this_type=new_this, static_type=new_static)
+                new_this.resolve(ret)
+                new_static.resolve(ret, ret.static_members)
             case GenericParamList():
                 # assert isinstance(ret, )
                 assert isinstance(ret, GenericType), f"Expected Generic Type, got {type(ret).__name__} `{ret.name}`"

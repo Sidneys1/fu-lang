@@ -90,7 +90,7 @@ class TypeDeclaration(Lex):
 class Declaration(Lex):
     """Declaration: [ 'static' ] Identity [ '=' Expression | Scope ];"""
     identity: Identity | SpecialOperatorIdentity
-    modifiers: list[TokenType] = field(default_factory=list)
+    modifiers: list[Token] = field(default_factory=list)
     initial: Union['Scope', 'Expression', ExpList, None] = None
     is_fat_arrow: bool = False
 
@@ -125,7 +125,7 @@ class Declaration(Lex):
 
         raw: list[Lex | Token] = []
 
-        modifiers: list[TokenType] = []
+        modifiers: list[Token] = []
         identity: Identity | None
         id_stack: list[Identifier] = []
         # metadata = None
@@ -140,12 +140,12 @@ class Declaration(Lex):
 
         if (tok := stream.peek()).type in (TokenType.StaticKeyword, ):
             stream.pop()
-            modifiers.append(tok.type)
+            modifiers.append(tok)
             raw.append(tok)
-            _LOG.debug(f"Got a decl modifier: {tok.value}")
+            _LOG.debug(f"Got a decl modifier: `{tok.value}`")
 
         if (identity := Identity.try_lex(stream)) is None:
-            if TokenType.StaticKeyword in modifiers:
+            if any(m.type == TokenType.StaticKeyword for m in modifiers):
                 return None
             # Maybe dotted?
             if (first_id := Identifier.try_lex(stream)) is None:
@@ -184,7 +184,7 @@ class Declaration(Lex):
         _LOG.debug(f"Got an identity: `{identity.lhs.value}`")
 
         if identity.rhs.ident.value in ('type', 'interface'):
-            if TokenType.StaticKeyword in modifiers:
+            if any(m.type == TokenType.StaticKeyword for m in modifiers):
                 return None
             if len(id_stack) > 1:
                 return None
